@@ -6,34 +6,31 @@ import pandas as pd
 def build_amazon_case_text(row: pd.Series) -> str:
     order_id = _text(row.get("Order ID")) or "[Order ID]"
     refund_amount = _money(row.get("Refund Amount"))
-    refund_date = _text(row.get("Refund Date")) or "not available"
+    refund_date = _text(row.get("Refund Date")) or "待确认"
     days_since_refund = _days_text(row.get("Days Since Refund"))
-    risk_type = _text(row.get("Risk Diagnosis")) or _text(row.get("Risk Level With Confidence")) or "Manual review"
-    reason_lines = _case_reason_lines(row)
+    risk_type = _text(row.get("Risk Diagnosis")) or _text(row.get("Risk Level With Confidence")) or "需要人工确认"
+    reason = _case_reason(row)
 
     return "\n".join(
         [
-            "Dear Amazon Seller Support,",
+            "您好，",
             "",
-            f"Please verify the FBA return and inventory status for order {order_id}.",
+            f"请协助核查订单 {order_id} 的退货入仓及商品状态。",
             "",
-            "Order details:",
-            f"- Amazon Order ID: {order_id}",
-            f"- Refund amount: {refund_amount}",
-            f"- Refund date: {refund_date}",
-            f"- Time since refund: {days_since_refund}",
-            f"- Current review type: {risk_type}",
+            f"订单号：{order_id}",
+            f"退款金额：{refund_amount}",
+            f"退款日期：{refund_date}",
+            f"距今：{days_since_refund}",
+            f"当前判断：{risk_type}",
             "",
-            "Reason for this case:",
-            *[f"- {line}" for line in reason_lines],
+            f"核查原因：{reason}",
             "",
-            "Requested action:",
-            "- Please confirm whether the returned unit was received by FBA.",
-            "- Please confirm the final item disposition, including sellable, unsellable, buyer-damaged, carrier-damaged, or missing inventory status.",
-            "- If the unit was not returned, lost, damaged, or otherwise eligible under Amazon policy, please advise whether reimbursement or further investigation is available.",
-            "- If this order is not eligible for reimbursement, please provide the reason so we can close our internal review.",
+            "请确认：",
+            "1. 商品是否已退回 FBA；",
+            "2. 当前状态是否可售 / 不可售；",
+            "3. 如不符合赔偿条件，请告知原因。",
             "",
-            "Thank you.",
+            "谢谢。",
         ]
     )
 
@@ -44,25 +41,14 @@ def build_case_filename(row: pd.Series) -> str:
     return f"amazon_case_{safe_order_id}.txt"
 
 
-def _case_reason_lines(row: pd.Series) -> list[str]:
-    reasons = []
+def _case_reason(row: pd.Series) -> str:
     if _is_suspected_not_returned(row):
-        reasons.append(
-            "The order was refunded, but our uploaded reports do not show a clear return received confirmation."
-        )
+        return "订单已退款，但当前报表暂未匹配到明确退货入仓证据，需要人工确认。"
     if _has_buyer_damage_signal(row):
-        reasons.append(
-            "The available return or inventory data indicates a possible buyer-damaged or unsellable condition; please verify condition and reimbursement eligibility."
-        )
+        return "系统发现商品可能存在买家损坏或不可售状态，请协助确认最终状态。"
     if _has_inventory_shortage_signal(row):
-        reasons.append(
-            "We found no confirmed FBA receiving or inventory movement record, so we need help with inventory reconciliation."
-        )
-    if not reasons:
-        reasons.append(
-            "The order requires manual verification because the return, refund, or inventory evidence is incomplete."
-        )
-    return reasons
+        return "当前未匹配到明确 FBA 入仓流水，需要协助核对库存记录。"
+    return "退货、退款或库存证据不完整，需要人工确认订单状态。"
 
 
 def _is_suspected_not_returned(row: pd.Series) -> bool:
@@ -104,8 +90,8 @@ def _money(value: object) -> str:
 def _days_text(value: object) -> str:
     days = _number(value)
     if days <= 0:
-        return "not available"
-    return f"{int(days)} days"
+        return "待确认"
+    return f"{int(days)} 天"
 
 
 def _number(value: object) -> float:

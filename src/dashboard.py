@@ -45,8 +45,6 @@ def render_data_preview(report_frames: dict[str, pd.DataFrame]) -> None:
 
 
 def render_match_diagnostics(analysis_df: pd.DataFrame) -> None:
-    st.subheader("匹配诊断")
-    st.caption("这个页面用来确认每个退款订单是否找到了退货记录和 FBA 入仓记录。")
     if analysis_df.empty:
         st.info("暂无订单数据。")
         return
@@ -60,18 +58,31 @@ def render_match_diagnostics(analysis_df: pd.DataFrame) -> None:
     if risk_orders.empty:
         risk_orders = analysis_df.copy()
     visible = _localized_match_table(risk_orders)
+    default_columns = [
+        "订单号",
+        "退款日期",
+        "退款金额",
+        "是否找到退货记录",
+        "是否找到入仓记录",
+        "是否存在异常",
+        "风险等级",
+        "诊断可信度",
+        "风险原因",
+        "建议动作",
+    ]
+    compact_visible = visible[[column for column in default_columns if column in visible.columns]]
     st.dataframe(
-        visible.head(10),
+        compact_visible.head(10),
         hide_index=True,
         use_container_width=True,
         column_config={
             "退款金额": st.column_config.NumberColumn("退款金额", format="$%.2f"),
         },
     )
-    if len(visible) > 10:
+    if len(compact_visible) > 10:
         with st.expander("展开完整匹配结果", expanded=False):
             st.dataframe(
-                visible,
+                compact_visible,
                 hide_index=True,
                 use_container_width=True,
                 column_config={
@@ -135,7 +146,7 @@ def _render_order_debug(row: pd.Series) -> None:
         col_returns, col_ledger, col_reimbursement = st.columns(3)
         with col_returns:
             st.markdown("**退货记录**")
-            st.write(
+            _render_fact_list(
                 {
                     "匹配状态": _match_label(row.get("Matched Returns")),
                     "退货日期": row.get("Return Date", ""),
@@ -146,7 +157,7 @@ def _render_order_debug(row: pd.Series) -> None:
             )
         with col_ledger:
             st.markdown("**FBA 入仓记录**")
-            st.write(
+            _render_fact_list(
                 {
                     "匹配状态": _match_label(row.get("Matched Ledger")),
                     "入仓记录日期": row.get("Ledger Date", ""),
@@ -160,7 +171,7 @@ def _render_order_debug(row: pd.Series) -> None:
             )
         with col_reimbursement:
             st.markdown("**赔偿状态**")
-            st.write(
+            _render_fact_list(
                 {
                     "状态": row.get("Reimbursement Status", "未赔偿"),
                     "日期": row.get("Reimbursement Date", ""),
@@ -193,6 +204,14 @@ def _render_order_debug(row: pd.Series) -> None:
 
 def _match_label(value) -> str:
     return "已匹配" if str(value).strip() == "是" else "未匹配"
+
+
+def _render_fact_list(items: dict[str, object]) -> None:
+    clean_items = [
+        {"项目": key, "结果": _clean_visible_value(_operational_text(value))}
+        for key, value in items.items()
+    ]
+    st.dataframe(pd.DataFrame(clean_items), hide_index=True, use_container_width=True)
 
 
 def render_top_risk_orders_dashboard(analysis_df: pd.DataFrame) -> None:
@@ -306,10 +325,13 @@ def _localized_match_table(df: pd.DataFrame) -> pd.DataFrame:
         visible["诊断可信度"] = visible["诊断可信度"].map(
             {"High Confidence": "高可信", "Medium Confidence": "中可信", "Low Confidence": "低可信"}
         ).fillna(visible["诊断可信度"])
+    visible["是否存在异常"] = visible["风险等级"].astype(str).apply(
+        lambda value: "需人工确认" if value in {"真正高风险", "需要人工确认", "数据不完整", "High", "Needs Review", "Data Incomplete"} else "未发现明显异常"
+    )
     for column in ["风险原因", "建议动作"]:
         if column in visible.columns:
             visible[column] = visible[column].apply(_operational_text)
-    return visible
+    return visible.applymap(_clean_visible_value)
 
 
 def _localize_order_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -438,4 +460,13 @@ def _operational_text(value: object) -> str:
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
+    return text
+
+
+def _clean_visible_value(value: object) -> str:
+    if pd.isna(value):
+        return "待确认"
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "null", "nat", "<na>"}:
+        return "待确认"
     return text

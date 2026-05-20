@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from html import escape
-from datetime import date
+from datetime import date, datetime
 
 import altair as alt
 import pandas as pd
@@ -39,6 +39,31 @@ from src.risk import apply_support_confirmation_overrides
 from src.sample_data import load_sample_reports
 
 
+FILTER_PRESETS = {
+    "高风险检查": {
+        "global_observation_window": 60,
+        "global_risk_level": "需要人工确认",
+        "global_asin_filter": "",
+        "global_sku_filter": "",
+        "advanced_mode": False,
+    },
+    "产品问题分析": {
+        "global_observation_window": 90,
+        "global_risk_level": "全部",
+        "global_asin_filter": "",
+        "global_sku_filter": "",
+        "advanced_mode": False,
+    },
+    "Case处理模式": {
+        "global_observation_window": 60,
+        "global_risk_level": "真正高风险",
+        "global_asin_filter": "",
+        "global_sku_filter": "",
+        "advanced_mode": False,
+    },
+}
+
+
 st.set_page_config(
     page_title="FBA 退货退款追踪工具",
     page_icon="",
@@ -63,6 +88,7 @@ def main() -> None:
             """,
             unsafe_allow_html=True,
         )
+        st.markdown('<div class="sidebar-section-title">导航</div>', unsafe_allow_html=True)
         page = _render_sidebar_nav()
         st.divider()
         filter_state = _render_sidebar_filters()
@@ -128,6 +154,7 @@ def main() -> None:
     advanced_mode = filter_state["advanced_mode"]
 
     if page == "总览":
+        _render_page_intro("总览", "快速判断当前筛选范围内，今天应该先处理哪些退款风险。")
         _render_metrics(visible_df)
         _render_dashboard(visible_df, summary_df, reason_analysis)
     elif page == "退货原因":
@@ -140,10 +167,20 @@ def main() -> None:
         risk_page_df = visible_df
         if filter_state["risk_level"] == "全部" and "Risk Level" in visible_df.columns:
             risk_page_df = visible_df[visible_df["Risk Level"].isin(["High", "Needs Review", "Data Incomplete"])]
+        st.markdown(
+            """
+            <div class="workbench-toolbar">
+                <div>
+                    <strong>运营任务队列</strong>
+                    <span>默认只看 P1，避免被长表格分散注意力。</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         priority_filter = st.selectbox("处理优先级", ["P1", "P2", "P3", "全部"], index=0, key="risk_page_priority_filter")
         if priority_filter != "全部" and "Operation Priority" in risk_page_df.columns:
             risk_page_df = risk_page_df[risk_page_df["Operation Priority"].eq(priority_filter)]
-        st.caption("默认只展示 P1 立即处理订单，可切换查看 P2 今日处理或 P3 观察订单。")
         _render_orders_table(risk_page_df)
         if advanced_mode:
             with st.expander("展开高级核查工具", expanded=False):
@@ -151,7 +188,10 @@ def main() -> None:
                 render_order_lifecycle(risk_page_df)
                 render_order_audit_table(risk_page_df)
     elif page == "匹配诊断":
-        _render_page_intro("匹配诊断", "查看系统为每个退款订单找到了哪些退货、入仓和赔偿证据。")
+        _render_page_intro(
+            "匹配诊断",
+            "查看每个退款订单是否匹配到退货、FBA 入仓和赔偿证据；这里只展示运营可理解的结论，原始字段和匹配日志放在技术详情里。",
+        )
         render_match_diagnostics(visible_df)
         if advanced_mode:
             with st.expander("展开技术详情", expanded=False):
@@ -182,38 +222,130 @@ def _render_sidebar_nav() -> str:
 
 
 def _render_sidebar_filters() -> dict[str, object]:
-    st.markdown("### 全局筛选")
-    observation_window_days = st.selectbox(
-        "观察窗口",
-        options=[30, 45, 60, 90],
-        index=2,
-        help="用于判断退款后多久仍需人工确认。系统只提示风险，不直接下最终结论。",
-        key="global_observation_window",
-    )
-    as_of = st.date_input("统计截止日期", value=date.today(), key="global_as_of")
-    risk_level = st.selectbox(
-        "风险等级",
-        options=["全部", "真正高风险", "需要人工确认", "数据不完整", "正常/低风险"],
-        index=0,
-        key="global_risk_level",
-    )
-    asin_filter = st.text_input("ASIN筛选", placeholder="输入 ASIN，可留空", key="global_asin_filter")
-    sku_filter = st.text_input("SKU筛选", placeholder="输入 SKU，可留空", key="global_sku_filter")
-    st.divider()
-    advanced_mode = st.toggle(
-        "高级模式",
-        value=False,
-        help="开启后显示字段识别、原始数据、匹配日志和完整核查工具。",
-        key="advanced_mode",
-    )
+    st.markdown('<div class="sidebar-section-title">全局筛选</div>', unsafe_allow_html=True)
+    _ensure_filter_defaults()
+    _render_filter_summary()
+    with st.expander("展开筛选", expanded=False):
+        custom_presets = st.session_state.get("custom_filter_presets", {})
+        preset_options = ["不套用"] + list(FILTER_PRESETS.keys()) + list(custom_presets.keys())
+        selected_preset = st.selectbox(
+            "筛选方案",
+            options=preset_options,
+            key="filter_preset_select",
+            help="常用运营场景可以直接套用，也可以保存当前筛选。",
+        )
+        col_apply, col_reset = st.columns(2)
+        if col_apply.button("套用方案", use_container_width=True):
+            _apply_filter_preset(selected_preset)
+            st.rerun()
+        if col_reset.button("重置筛选", use_container_width=True):
+            _reset_filters()
+            st.rerun()
+
+        observation_window_days = st.selectbox(
+            "观察窗口",
+            options=[30, 45, 60, 90],
+            help="用于判断退款后多久仍需人工确认。系统只提示风险，不直接下最终结论。",
+            key="global_observation_window",
+        )
+        as_of = st.date_input("统计截止日期", key="global_as_of")
+        risk_level = st.selectbox(
+            "风险等级",
+            options=["全部", "真正高风险", "需要人工确认", "数据不完整", "正常/低风险"],
+            key="global_risk_level",
+        )
+        asin_filter = st.text_input("ASIN筛选", placeholder="输入 ASIN，可留空", key="global_asin_filter")
+        sku_filter = st.text_input("SKU筛选", placeholder="输入 SKU，可留空", key="global_sku_filter")
+        advanced_mode = st.toggle(
+            "高级模式",
+            help="开启后显示字段识别、原始数据、匹配日志和完整核查工具。",
+            key="advanced_mode",
+        )
+
+        preset_name = st.text_input("保存筛选方案", placeholder="例如：加拿大站高金额退款", key="filter_preset_name")
+        if st.button("保存当前筛选", use_container_width=True):
+            _save_current_filter_preset(preset_name)
+            st.rerun()
     return {
-        "observation_window_days": int(observation_window_days),
-        "as_of": as_of,
-        "risk_level": risk_level,
-        "asin_filter": asin_filter.strip(),
-        "sku_filter": sku_filter.strip(),
-        "advanced_mode": bool(advanced_mode),
+        "observation_window_days": int(st.session_state.get("global_observation_window", observation_window_days)),
+        "as_of": st.session_state.get("global_as_of", as_of),
+        "risk_level": str(st.session_state.get("global_risk_level", risk_level)),
+        "asin_filter": str(st.session_state.get("global_asin_filter", asin_filter)).strip(),
+        "sku_filter": str(st.session_state.get("global_sku_filter", sku_filter)).strip(),
+        "advanced_mode": bool(st.session_state.get("advanced_mode", advanced_mode)),
     }
+
+
+def _ensure_filter_defaults() -> None:
+    defaults = {
+        "global_observation_window": 60,
+        "global_as_of": date.today(),
+        "global_risk_level": "全部",
+        "global_asin_filter": "",
+        "global_sku_filter": "",
+        "advanced_mode": False,
+    }
+    for key, value in defaults.items():
+        st.session_state.setdefault(key, value)
+
+
+def _render_filter_summary() -> None:
+    observation = st.session_state.get("global_observation_window", 60)
+    risk = st.session_state.get("global_risk_level", "全部")
+    asin = str(st.session_state.get("global_asin_filter", "") or "").strip()
+    sku = str(st.session_state.get("global_sku_filter", "") or "").strip()
+    details = [f"{observation}天", str(risk)]
+    if asin:
+        details.append(f"ASIN: {asin}")
+    if sku:
+        details.append(f"SKU: {sku}")
+    st.markdown(
+        f"""
+        <div class="filter-summary">
+            <span>当前筛选</span>
+            <p>{escape(" · ".join(details))}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _apply_filter_preset(name: str) -> None:
+    if name == "不套用":
+        return
+    presets = {**FILTER_PRESETS, **st.session_state.get("custom_filter_presets", {})}
+    preset = presets.get(name, {})
+    for key, value in preset.items():
+        st.session_state[key] = value
+
+
+def _reset_filters() -> None:
+    for key, value in {
+        "global_observation_window": 60,
+        "global_as_of": date.today(),
+        "global_risk_level": "全部",
+        "global_asin_filter": "",
+        "global_sku_filter": "",
+        "advanced_mode": False,
+    }.items():
+        st.session_state[key] = value
+
+
+def _save_current_filter_preset(name: str) -> None:
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        st.warning("请先输入筛选方案名称。")
+        return
+    custom_presets = dict(st.session_state.get("custom_filter_presets", {}))
+    custom_presets[clean_name] = {
+        "global_observation_window": st.session_state.get("global_observation_window", 60),
+        "global_as_of": st.session_state.get("global_as_of", date.today()),
+        "global_risk_level": st.session_state.get("global_risk_level", "全部"),
+        "global_asin_filter": st.session_state.get("global_asin_filter", ""),
+        "global_sku_filter": st.session_state.get("global_sku_filter", ""),
+        "advanced_mode": st.session_state.get("advanced_mode", False),
+    }
+    st.session_state["custom_filter_presets"] = custom_presets
 
 
 def _apply_global_filters(df: pd.DataFrame, filter_state: dict[str, object]) -> pd.DataFrame:
@@ -273,11 +405,14 @@ def _render_uploads():
     uploaded_ledger = st.session_state.get("ledger_file")
     uploaded_reimbursements = st.session_state.get("reimbursements_file")
     has_required_uploads = bool(uploaded_returns) and bool(uploaded_payments)
+    upload_infos = _build_upload_status_infos(
+        returns_file=uploaded_returns,
+        payment_files=uploaded_payments,
+        ledger_file=uploaded_ledger,
+        reimbursements_file=uploaded_reimbursements,
+    )
     _render_upload_status_cards(
-        returns_count=1 if uploaded_returns else 0,
-        payments_count=len(uploaded_payments),
-        ledger_count=1 if uploaded_ledger else 0,
-        reimbursements_count=1 if uploaded_reimbursements else 0,
+        upload_infos,
     )
 
     with st.expander("重新上传 / 查看已上传文件", expanded=not has_required_uploads):
@@ -319,26 +454,62 @@ def _render_uploads():
     return returns_file, payments_file, ledger_file, reimbursements_file
 
 
-def _render_upload_status_cards(
-    returns_count: int,
-    payments_count: int,
-    ledger_count: int,
-    reimbursements_count: int,
-) -> None:
+def _build_upload_status_infos(
+    returns_file,
+    payment_files,
+    ledger_file,
+    reimbursements_file,
+) -> list[dict[str, str | int | bool]]:
     items = [
-        ("退货报表", returns_count, returns_count > 0),
-        ("交易报表", payments_count, payments_count > 0),
-        ("库存流水", ledger_count, ledger_count > 0),
-        ("赔偿报表", reimbursements_count, reimbursements_count > 0),
+        ("returns", "退货报表", [returns_file] if returns_file else []),
+        ("payments", "交易报表", list(payment_files or [])),
+        ("ledger", "库存流水", [ledger_file] if ledger_file else []),
+        ("reimbursements", "赔偿报表", [reimbursements_file] if reimbursements_file else []),
     ]
+    infos: list[dict[str, str | int | bool]] = []
+    for key, label, files in items:
+        names = [getattr(file, "name", "") for file in files if file]
+        signature = "|".join(names)
+        time_key = f"upload_time_{key}"
+        signature_key = f"upload_signature_{key}"
+        if signature and st.session_state.get(signature_key) != signature:
+            st.session_state[signature_key] = signature
+            st.session_state[time_key] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        elif not signature:
+            st.session_state.pop(signature_key, None)
+            st.session_state.pop(time_key, None)
+
+        infos.append(
+            {
+                "label": label,
+                "count": len(names),
+                "ready": bool(names),
+                "file_names": "、".join(names[:2]) + (" 等" if len(names) > 2 else ""),
+                "uploaded_at": st.session_state.get(time_key, ""),
+            }
+        )
+    return infos
+
+
+def _render_upload_status_cards(upload_infos: list[dict[str, str | int | bool]]) -> None:
     cards = []
-    for label, count, is_ready in items:
+    for item in upload_infos:
+        label = str(item["label"])
+        count = int(item["count"])
+        is_ready = bool(item["ready"])
+        file_names = str(item.get("file_names") or "等待上传")
+        uploaded_at = str(item.get("uploaded_at") or "未上传")
         tone = "ready" if is_ready else "empty"
-        icon = "✓" if is_ready else "待上传"
+        icon = "✓" if is_ready else "待"
+        status = "已上传" if is_ready else "待上传"
         cards.append(
             f'<div class="upload-status-card {tone}">'
-            f'<span class="upload-status-icon">{icon}</span>'
-            f"<span>{escape(label)}（{count}）</span>"
+            f'<span class="upload-status-icon">{escape(icon)}</span>'
+            '<div class="upload-status-body">'
+            f"<div class='upload-status-title'>{escape(label)}（{count}）<span>{escape(status)}</span></div>"
+            f"<div class='upload-status-file' title='{escape(file_names)}'>{escape(file_names)}</div>"
+            f"<div class='upload-status-time'>上传时间：{escape(uploaded_at)}</div>"
+            "</div>"
             "</div>"
         )
     st.markdown(
@@ -443,6 +614,24 @@ def _render_detected_columns(return_columns, payment_columns) -> None:
         st.json(_column_map_to_dict(payment_columns))
 
 
+def _metric_value_class(value: str) -> str:
+    value_len = len(str(value))
+    if value_len >= 12:
+        return "metric-value tight"
+    if value_len >= 9:
+        return "metric-value compact"
+    return "metric-value"
+
+
+def _metric_help_class(text: str) -> str:
+    text_len = len(str(text))
+    if text_len >= 18:
+        return "metric-help tight"
+    if text_len >= 14:
+        return "metric-help compact"
+    return "metric-help"
+
+
 def _render_metrics(df: pd.DataFrame) -> None:
     total_refunds = len(df)
     matched_returns = _series_or_default(df, "Matched Returns", "否")
@@ -472,14 +661,16 @@ def _render_metrics(df: pd.DataFrame) -> None:
     )
 
     metrics = [
-        ("退款订单数", f"{total_refunds:,}", "当前报表内识别到的退款订单", "neutral", "01"),
-        ("已确认退回", f"{confirmed_returned:,}", "已匹配退货或 FBA 入仓记录", "ok", "02"),
-        ("未确认退回", f"{unconfirmed:,}", "暂未确认商品回到 FBA", "warning", "03"),
-        ("超60天待确认", f"{overdue_unconfirmed:,}", "不是最终判定，建议人工核查", "danger", "04"),
-        ("待核查退款金额", f"${suspicious_refund_amount:,.2f}", "需要人工确认订单对应退款金额", "danger", "05"),
+        ("退款订单数", f"{total_refunds:,}", "当前筛选范围内的退款订单", "当前样本", "neutral", "01"),
+        ("已确认退回", f"{confirmed_returned:,}", "已匹配退货或 FBA 入仓记录", "确认事实", "ok", "02"),
+        ("未确认退回", f"{unconfirmed:,}", "暂未匹配明确回仓证据", "需确认", "warning", "03"),
+        ("超60天待确认", f"{overdue_unconfirmed:,}", "不是最终判定，建议人工核查", "优先关注", "danger", "04"),
+        ("待核查退款金额", f"${suspicious_refund_amount:,.2f}", "需要人工确认订单对应退款金额", "资金影响", "danger", "05"),
     ]
     cols = st.columns(5)
-    for col, (label, value, help_text, tone, icon) in zip(cols, metrics):
+    for col, (label, value, help_text, trend, tone, icon) in zip(cols, metrics):
+        value_class = _metric_value_class(value)
+        help_class = _metric_help_class(help_text)
         with col:
             st.markdown(
                 f"""
@@ -488,8 +679,9 @@ def _render_metrics(df: pd.DataFrame) -> None:
                         <span class="metric-icon">{icon}</span>
                         <span class="metric-label">{label}</span>
                     </div>
-                    <div class="metric-value">{value}</div>
-                    <div class="metric-help">{help_text}</div>
+                    <div class="{value_class}" title="{escape(value)}">{escape(value)}</div>
+                    <div class="metric-trend">{trend}</div>
+                    <div class="{help_class}" title="{escape(help_text)}">{escape(help_text)}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -501,17 +693,19 @@ def _render_dashboard(
     reason_summary_df: pd.DataFrame,
     reason_analysis: dict[str, pd.DataFrame],
 ) -> None:
-    _render_page_intro("总览", "快速判断当前筛选范围内，今天应该先处理哪些退款风险。")
     asin_summary = reason_analysis["asin_summary"]
     risk_orders = analysis_df[analysis_df["Risk Level"].isin(["High", "Needs Review", "Data Incomplete"])].copy()
     p1_count = int(analysis_df.get("Operation Priority", pd.Series(dtype=str)).eq("P1").sum())
     high_risk_count = int(analysis_df["Risk Level"].eq("High").sum())
     review_count = int(analysis_df["Risk Level"].isin(["High", "Needs Review"]).sum())
     suspicious_amount = float(analysis_df.loc[analysis_df["Risk Level"].isin(["High", "Needs Review"]), "Refund Amount"].fillna(0).sum())
+    _render_confidence_notice(analysis_df)
     st.markdown('<div class="dashboard-section-heading">今日处理概览</div>', unsafe_allow_html=True)
     col_a, col_b = st.columns(2, gap="large")
     col_a.markdown(_mini_card("P1 立即处理", f"{p1_count:,}", f"待确认 {review_count:,} 单，真正高风险 {high_risk_count:,} 单", "danger"), unsafe_allow_html=True)
     col_b.markdown(_mini_card("待核查退款金额", f"${suspicious_amount:,.2f}", "需要人工确认订单对应退款金额", "warning"), unsafe_allow_html=True)
+    _render_overview_next_actions(p1_count, review_count, suspicious_amount)
+    _render_decision_actions(analysis_df, reason_summary_df, asin_summary)
 
     st.markdown('<div class="dashboard-section-heading secondary">重点榜单</div>', unsafe_allow_html=True)
     col_orders, col_reasons, col_asins = st.columns(3, gap="large")
@@ -539,6 +733,101 @@ def _render_dashboard(
             top_asins[[column for column in ["ASIN", "SKU", "退款订单数", "未退回订单数", "总退款金额"] if column in top_asins.columns]],
             currency_columns={"总退款金额"},
         )
+
+
+def _render_decision_actions(
+    analysis_df: pd.DataFrame,
+    reason_summary_df: pd.DataFrame,
+    asin_summary: pd.DataFrame,
+) -> None:
+    priority_series = _series_or_default(analysis_df, "Operation Priority", "")
+    risk_series = _series_or_default(analysis_df, "Risk Level", "")
+    case_candidates = analysis_df[
+        priority_series.isin(["P1", "P2"]) & risk_series.isin(["High", "Needs Review"])
+    ].copy()
+    if not case_candidates.empty:
+        sort_columns = [
+            column for column in ["Operation Priority", "Refund Amount", "Days Since Refund"]
+            if column in case_candidates.columns
+        ]
+        if sort_columns:
+            case_candidates = case_candidates.sort_values(
+                sort_columns,
+                ascending=[True, False, False][: len(sort_columns)],
+            )
+        case_order = _safe_text(case_candidates.iloc[0].get("Order ID"))
+    else:
+        case_order = "暂无"
+
+    top_asin = _top_asin_label(asin_summary)
+    top_reason = _top_reason_label(reason_summary_df)
+    action_items = [
+        ("今日优先处理", f"{int(priority_series.eq('P1').sum())} 个 P1 订单"),
+        ("建议先开 Case", case_order),
+        ("当前最危险 ASIN", top_asin),
+        ("主要退货原因", top_reason),
+    ]
+    cards = []
+    for label, value in action_items:
+        cards.append(
+            "<div class='decision-action-card'>"
+            f"<span>{escape(label)}</span>"
+            f"<strong title='{escape(value)}'>{escape(_shorten_text(value, 28))}</strong>"
+            "</div>"
+        )
+    st.markdown(
+        f"<div class='decision-action-grid'>{''.join(cards)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_confidence_notice(df: pd.DataFrame) -> None:
+    if df.empty:
+        return
+    confidence = _series_or_default(df, "Evidence Confidence", "Low Confidence")
+    high = int(confidence.eq("High Confidence").sum())
+    medium = int(confidence.eq("Medium Confidence").sum())
+    low = int(confidence.eq("Low Confidence").sum())
+    st.markdown(
+        f"""
+        <div class="confidence-notice">
+            <div>
+                <div class="confidence-title">系统可信度提示</div>
+                <div class="confidence-copy">本工具只做运营核查优先级提示，不把“未匹配”直接判定为“未退回”。</div>
+            </div>
+            <div class="confidence-stats">
+                <span>高可信 {high}</span>
+                <span>中可信 {medium}</span>
+                <span>低可信 {low}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_overview_next_actions(p1_count: int, review_count: int, suspicious_amount: float) -> None:
+    if p1_count > 0:
+        title = "下一步动作"
+        body = f"先处理 {p1_count} 个 P1 订单，再核查待确认金额 ${suspicious_amount:,.2f}。"
+        tone = "warning"
+    elif review_count > 0:
+        title = "下一步动作"
+        body = f"当前有 {review_count} 个订单需要人工确认，建议按退款金额从高到低抽查。"
+        tone = "neutral"
+    else:
+        title = "今日无高优先级风险"
+        body = "当前筛选范围内暂无需要立即处理的订单，建议查看退货原因和 Listing 优化建议。"
+        tone = "ok"
+    st.markdown(
+        f"""
+        <div class="next-action-card {tone}">
+            <span>{escape(title)}</span>
+            <p>{escape(body)}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _series_or_default(df: pd.DataFrame, column: str, default: str) -> pd.Series:
@@ -581,7 +870,18 @@ def _render_top_orders_list(df: pd.DataFrame) -> None:
 
 def _render_orders_table(df: pd.DataFrame) -> None:
     if df.empty:
-        st.success("当前筛选条件下没有可疑订单。")
+        st.markdown(
+            """
+            <div class="success-empty-state">
+                <div class="success-icon">✓</div>
+                <div>
+                    <div class="success-title">今日无高优先级风险订单</div>
+                    <div class="success-copy">当前筛选条件下没有需要立即处理的订单。可以切换 P2 / P3，或查看退货原因判断产品与 Listing 优化方向。</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         return
 
     _render_risk_priority_cards(df)
@@ -686,12 +986,20 @@ def _render_reason_analysis(
     distribution = reason_analysis["asin_reason_distribution"]
     advice = build_reason_category_advice()
 
-    col_category, col_reason = st.columns([4, 6])
+    _render_reason_next_action(category_summary)
+    _render_reason_insight_summary(category_summary, distribution, reason_summary_df)
+    col_category, col_reason = st.columns([5, 5], gap="large")
     with col_category:
-        st.markdown("**原因分类占比**")
+        st.markdown("**退货原因趋势图**")
         if category_summary.empty:
             st.info("暂无原因分类数据。")
         else:
+            _render_horizontal_bar_chart(
+                category_summary,
+                label_column="Reason Category",
+                value_column="Reason Share",
+                value_title="占比",
+            )
             display_category = category_summary.rename(
                 columns={
                     "Reason Category": "原因分类",
@@ -700,13 +1008,8 @@ def _render_reason_analysis(
                     "Reason Share": "占比",
                 }
             )
-            _render_soft_table(display_category)
-            _render_horizontal_bar_chart(
-                category_summary,
-                label_column="Reason Category",
-                value_column="Reason Share",
-                value_title="占比",
-            )
+            with st.expander("查看原因分类占比表", expanded=False):
+                _render_soft_table(display_category)
 
     with col_reason:
         st.markdown("**Top 10 退货原因明细**")
@@ -726,10 +1029,10 @@ def _render_reason_analysis(
                 with st.expander("查看全部退货原因明细", expanded=False):
                     _render_soft_table(display_reasons)
 
-    st.markdown("**原因分类对应建议**")
+    st.markdown("**下一步优化建议**")
     active_categories = set(category_summary.get("Reason Category", pd.Series(dtype=str)).astype(str))
     advice_to_show = advice[advice["原因分类"].isin(active_categories)] if active_categories else advice
-    st.dataframe(advice_to_show, hide_index=True, use_container_width=True)
+    _render_reason_advice_cards(advice_to_show.head(6))
 
     with st.expander("查看每个 ASIN 的退货原因分布", expanded=False):
         display_distribution = distribution.rename(
@@ -741,6 +1044,98 @@ def _render_reason_analysis(
             }
         )
         _render_soft_table(display_distribution)
+
+
+def _render_reason_next_action(category_summary: pd.DataFrame) -> None:
+    if category_summary.empty:
+        return
+    top = category_summary.sort_values("Reason Count", ascending=False).iloc[0]
+    category = _safe_text(top.get("Reason Category")) or "退货原因"
+    count = int(pd.to_numeric(pd.Series([top.get("Reason Count")]), errors="coerce").fillna(0).iloc[0])
+    share = pd.to_numeric(pd.Series([top.get("Reason Share")]), errors="coerce").fillna(0).iloc[0]
+    st.markdown(
+        f"""
+        <div class="next-action-card neutral">
+            <span>下一步动作</span>
+            <p>优先复盘「{escape(category)}」相关订单：当前 {count} 单，占比 {float(share) * 100:.2f}%。先看差评、退货留言和 Listing 表达是否一致。</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_reason_insight_summary(
+    category_summary: pd.DataFrame,
+    distribution: pd.DataFrame,
+    reason_summary_df: pd.DataFrame,
+) -> None:
+    if category_summary.empty and distribution.empty and reason_summary_df.empty:
+        return
+    insights = []
+    if not category_summary.empty:
+        sorted_categories = category_summary.sort_values("Reason Count", ascending=False)
+        top = sorted_categories.iloc[0]
+        category = _safe_text(top.get("Reason Category")) or "退货原因"
+        share = pd.to_numeric(pd.Series([top.get("Reason Share")]), errors="coerce").fillna(0).iloc[0]
+        focus = _reason_focus_action(category)
+        insights.append(("主要问题", f"{category}占比 {float(share) * 100:.2f}%，{focus}"))
+    if not distribution.empty:
+        sort_columns = [column for column in ["Reason Count", "Refund Amount"] if column in distribution.columns]
+        sorted_distribution = (
+            distribution.sort_values(sort_columns, ascending=[False, False][: len(sort_columns)])
+            if sort_columns
+            else distribution
+        )
+        row = sorted_distribution.iloc[0]
+        asin = _safe_text(row.get("ASIN")) or "某 ASIN"
+        sku = _safe_text(row.get("SKU")) or "对应 SKU"
+        reason = _safe_text(row.get("Reason Category")) or "退货原因"
+        insights.append(("异常对象", f"{asin} / {sku} 的「{reason}」更集中，建议先抽样查看退货留言。"))
+    if not reason_summary_df.empty:
+        top_reason = _top_reason_label(reason_summary_df)
+        insights.append(("Listing 线索", f"高频原因集中在「{top_reason}」，优先检查主图、标题、尺寸说明和五点描述是否造成预期偏差。"))
+    cards = []
+    for label, text in insights[:3]:
+        cards.append(
+            "<div class='insight-card'>"
+            f"<span>{escape(label)}</span>"
+            f"<p>{escape(_shorten_text(text, 110))}</p>"
+            "</div>"
+        )
+    st.markdown(
+        "<div class='insight-section-title'>AI 洞察摘要</div>"
+        f"<div class='insight-grid'>{''.join(cards)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _reason_focus_action(category: str) -> str:
+    if any(keyword in category for keyword in ["质量", "故障", "缺件"]):
+        return "更偏向产品或批次问题"
+    if any(keyword in category for keyword in ["尺寸", "适配", "Listing", "信息"]):
+        return "更偏向信息表达或规格误解"
+    if any(keyword in category for keyword in ["配送", "破损", "无法送达"]):
+        return "更偏向履约或包装链路"
+    return "建议结合订单备注继续确认"
+
+
+def _render_reason_advice_cards(advice_df: pd.DataFrame) -> None:
+    if advice_df.empty:
+        st.info("暂无建议。")
+        return
+    cards = []
+    for _, row in advice_df.iterrows():
+        category = _safe_text(row.get("原因分类"))
+        possible = _safe_text(row.get("可能原因"))
+        action = _safe_text(row.get("建议优化动作"))
+        cards.append(
+            "<div class='reason-advice-card'>"
+            f"<div class='reason-advice-title'>{escape(category)}</div>"
+            f"<div class='reason-advice-copy'><span>可能原因</span>{escape(_shorten_text(possible, 70))}</div>"
+            f"<div class='reason-advice-copy'><span>建议动作</span>{escape(_shorten_text(action, 88))}</div>"
+            "</div>"
+        )
+    st.markdown(f"<div class='reason-advice-grid'>{''.join(cards)}</div>", unsafe_allow_html=True)
 
 
 def _render_recommendations(df: pd.DataFrame) -> None:
@@ -772,7 +1167,8 @@ def _inject_styles() -> None:
         """
         <style>
         :root {
-            --bg: #E9EEF5;
+            --bg: #EEF3F8;
+            --bg-soft: #F4F7FB;
             --card: #F7F9FC;
             --card-strong: #FFFFFF;
             --table-bg: #FFFFFF;
@@ -789,10 +1185,16 @@ def _inject_styles() -> None:
             --soft-shadow: 4px 4px 10px var(--shadow-dark), -4px -4px 10px var(--shadow-light);
             --soft-shadow-hover: 5px 5px 12px rgba(150,164,184,0.26), -5px -5px 12px rgba(255,255,255,0.78);
             --inset-shadow: inset 3px 3px 7px rgba(150,164,184,0.22), inset -3px -3px 7px rgba(255,255,255,0.72);
+            --radius-sm: 12px;
+            --radius-md: 16px;
+            --radius-lg: 20px;
+            --space-section: 1.6rem;
         }
 
         html, body, [data-testid="stAppViewContainer"], .stApp {
-            background: var(--bg);
+            background:
+                radial-gradient(circle at 20% 0%, rgba(255,255,255,0.68), rgba(255,255,255,0) 24rem),
+                linear-gradient(180deg, #F3F7FC 0%, var(--bg) 32%, #E9EEF5 100%);
             color: var(--text);
         }
 
@@ -812,11 +1214,13 @@ def _inject_styles() -> None:
         }
 
         .main .block-container {
-            max-width: 1400px;
-            padding-top: 1.7rem;
+            max-width: 1440px;
+            margin-left: auto;
+            margin-right: auto;
+            padding-top: 1.55rem;
             padding-bottom: 4rem;
-            padding-left: 1.5rem;
-            padding-right: 1.5rem;
+            padding-left: 2rem;
+            padding-right: 2rem;
         }
 
         h1, h2, h3, h4, h5, h6, p, label, span {
@@ -828,12 +1232,16 @@ def _inject_styles() -> None:
             letter-spacing: 0 !important;
         }
 
-        h1 { font-size: 2.35rem !important; }
-        h2 { font-size: 1.65rem !important; }
-        h3 { font-size: 1.3rem !important; }
+        h1 { font-size: clamp(2.25rem, 3vw, 2.5rem) !important; margin-bottom: 0.65rem !important; }
+        h2 { font-size: 1.5rem !important; }
+        h3 { font-size: 1.25rem !important; }
 
         p, li, label, span {
             font-weight: 400;
+        }
+
+        [data-testid="stVerticalBlock"] {
+            gap: 0.92rem;
         }
 
         h1 a, h2 a, h3 a, h4 a, h5 a, h6 a,
@@ -871,7 +1279,36 @@ def _inject_styles() -> None:
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 10px 6px 16px;
+            padding: 10px 6px 20px;
+        }
+
+        .sidebar-section-title {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            margin: 0.35rem 0 0.45rem;
+        }
+
+        .filter-summary {
+            border-radius: var(--radius-md);
+            background: rgba(255,255,255,0.62);
+            border: 1px solid rgba(190,200,212,0.30);
+            padding: 11px 12px;
+            margin: 0.2rem 0 0.65rem;
+        }
+
+        .filter-summary span {
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .filter-summary p {
+            color: var(--text);
+            font-size: 12px;
+            line-height: 1.45;
+            margin: 4px 0 0;
         }
 
         .sidebar-logo {
@@ -1040,7 +1477,8 @@ def _inject_styles() -> None:
         .stButton > button,
         .stDownloadButton > button {
             border: 0;
-            border-radius: 16px;
+            border-radius: var(--radius-md);
+            min-height: 38px;
             background: var(--card);
             color: var(--text);
             box-shadow: var(--soft-shadow);
@@ -1099,20 +1537,23 @@ def _inject_styles() -> None:
         }
 
         .metric-card {
-            min-height: 138px;
-            padding: 18px 18px 16px;
+            min-height: 148px;
+            padding: 20px 20px 18px;
             position: relative;
             overflow: hidden;
+            background:
+                linear-gradient(145deg, rgba(255,255,255,0.78), rgba(247,249,252,0.94));
         }
 
         .metric-card::after {
             content: "";
             position: absolute;
-            inset: auto 16px 14px auto;
-            width: 38px;
-            height: 38px;
-            border-radius: 14px;
+            inset: 0 0 auto auto;
+            width: 88px;
+            height: 88px;
+            border-radius: 0 18px 0 70px;
             opacity: 0.12;
+            background: var(--accent);
         }
 
         .metric-card.danger::after { background: var(--danger); }
@@ -1122,8 +1563,8 @@ def _inject_styles() -> None:
 
         .metric-card.danger {
             background: var(--card-strong);
-            border-color: rgba(231, 111, 81, 0.26);
-            box-shadow: 4px 4px 12px rgba(231,111,81,0.10), -4px -4px 10px rgba(255,255,255,0.78);
+            border-color: rgba(231, 111, 81, 0.18);
+            box-shadow: 4px 4px 10px rgba(231,111,81,0.08), -4px -4px 10px rgba(255,255,255,0.72);
         }
 
         .metric-top {
@@ -1153,16 +1594,29 @@ def _inject_styles() -> None:
 
         .metric-label, .mini-label {
             color: var(--muted);
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
         }
 
         .metric-value, .mini-value {
             color: var(--text);
-            font-size: 30px;
+            font-size: 34px;
             font-weight: 700;
             line-height: 1.08;
             letter-spacing: 0;
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .metric-value.compact {
+            font-size: clamp(27px, 1.8vw, 32px);
+            line-height: 1.05;
+        }
+
+        .metric-value.tight {
+            font-size: clamp(23px, 1.55vw, 28px);
+            line-height: 1.05;
         }
 
         .mini-value {
@@ -1183,18 +1637,67 @@ def _inject_styles() -> None:
 
         .metric-card.danger .metric-value {
             color: #B94128;
-            font-size: 36px;
+            font-size: 38px;
+        }
+
+        .metric-card.danger .metric-value.compact {
+            font-size: clamp(27px, 1.8vw, 32px);
+        }
+
+        .metric-card.danger .metric-value.tight {
+            font-size: clamp(23px, 1.55vw, 28px);
         }
 
         .metric-card.warning .metric-value {
             color: #A85F12;
         }
 
+        .metric-trend {
+            display: inline-flex;
+            width: fit-content;
+            margin-top: 8px;
+            padding: 4px 9px;
+            border-radius: 999px;
+            background: rgba(102,126,234,0.08);
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .metric-card.danger .metric-trend {
+            color: #B94128;
+            background: rgba(231,111,81,0.10);
+        }
+
+        .metric-card.warning .metric-trend {
+            color: #8A4B0E;
+            background: rgba(244,162,97,0.14);
+        }
+
+        .metric-card.ok .metric-trend {
+            color: #2D7D55;
+            background: rgba(82,183,136,0.14);
+        }
+
         .metric-help, .mini-help {
             color: var(--muted);
             font-size: 12px;
-            margin-top: 10px;
+            margin-top: 8px;
             line-height: 1.45;
+        }
+
+        .metric-help {
+            max-width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .metric-help.compact {
+            font-size: 11px;
+        }
+
+        .metric-help.tight {
+            font-size: 10px;
         }
 
         .dashboard-section-heading {
@@ -1210,10 +1713,107 @@ def _inject_styles() -> None:
             border-top: 1px solid rgba(148, 163, 184, 0.22);
         }
 
+        .confidence-notice,
+        .next-action-card,
+        .workbench-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            border-radius: 18px;
+            background: var(--card-strong);
+            border: 1px solid rgba(190,200,212,0.34);
+            padding: 14px 16px;
+            margin: 1.05rem 0 1.25rem;
+        }
+
+        .confidence-title,
+        .next-action-card span,
+        .workbench-toolbar strong {
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .confidence-copy,
+        .next-action-card p,
+        .workbench-toolbar span {
+            color: var(--muted);
+            font-size: 12px;
+            margin: 3px 0 0;
+            line-height: 1.45;
+        }
+
+        .confidence-stats {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .confidence-stats span {
+            border-radius: 999px;
+            padding: 5px 9px;
+            background: #F1F5F9;
+            color: #64748B;
+            font-size: 11px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .next-action-card {
+            justify-content: flex-start;
+            border-left: 4px solid rgba(102,126,234,0.42);
+        }
+
+        .next-action-card.ok {
+            border-left-color: var(--success);
+            background: #F3FBF6;
+        }
+
+        .next-action-card.warning {
+            border-left-color: var(--warning);
+            background: #FFF9ED;
+        }
+
+        .decision-action-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 14px;
+            margin: 1rem 0 1.8rem;
+        }
+
+        .decision-action-card {
+            min-height: 92px;
+            padding: 15px 16px;
+            border-radius: var(--radius-lg);
+            background: var(--card-strong);
+            border: 1px solid rgba(190,200,212,0.32);
+        }
+
+        .decision-action-card span {
+            display: block;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 9px;
+        }
+
+        .decision-action-card strong {
+            display: block;
+            color: var(--text);
+            font-size: 17px;
+            font-weight: 700;
+            line-height: 1.28;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .mini-card {
             min-height: 104px;
             padding: 16px 18px;
-            border-left: 6px solid rgba(102, 126, 234, 0.55);
+            border-left: 4px solid rgba(102, 126, 234, 0.42);
             background: var(--card-strong);
         }
 
@@ -1244,24 +1844,24 @@ def _inject_styles() -> None:
 
         .risk-order-card {
             padding: 14px 16px;
-            border-left: 6px solid var(--danger);
-            background: #FFF7F3;
+            border-left: 4px solid rgba(231,111,81,0.58);
+            background: #FFF9F6;
             margin-bottom: 8px;
-            min-height: 154px;
+            min-height: 168px;
         }
 
         .risk-order-card.high {
-            border-color: var(--danger);
-            background: #FFF7F3;
+            border-color: rgba(231,111,81,0.58);
+            background: #FFF9F6;
         }
 
         .risk-order-card.medium {
-            border-color: var(--warning);
-            background: #FFF9ED;
+            border-color: rgba(244,162,97,0.62);
+            background: #FFFBF2;
         }
 
         .risk-order-card.low {
-            border-color: var(--low);
+            border-color: rgba(100,116,139,0.32);
             background: #F8FAFC;
         }
 
@@ -1301,7 +1901,7 @@ def _inject_styles() -> None:
             font-size: 12px;
             font-weight: 700;
             white-space: nowrap;
-            background: rgba(231, 111, 81, 0.14);
+            background: rgba(231, 111, 81, 0.10);
             color: #B94128;
         }
 
@@ -1428,6 +2028,45 @@ def _inject_styles() -> None:
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+
+        .evidence-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .evidence-chip-row span {
+            border-radius: 999px;
+            padding: 4px 8px;
+            background: rgba(100,116,139,0.08);
+            color: #64748B;
+            font-size: 10.5px;
+            font-weight: 650;
+            white-space: nowrap;
+        }
+
+        .risk-workflow-meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 5px 8px;
+            margin-top: 10px;
+            padding-top: 9px;
+            border-top: 1px solid rgba(148,163,184,0.16);
+        }
+
+        .risk-workflow-meta span {
+            color: var(--muted);
+            font-size: 10.5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .risk-order-card + [data-testid="stHorizontalBlock"] {
+            margin-top: -0.15rem;
+            margin-bottom: 0.85rem;
         }
 
         .top-order-list {
@@ -1577,7 +2216,7 @@ def _inject_styles() -> None:
             grid-template-columns: 72px 1fr;
             gap: 10px;
             align-items: start;
-            margin: 8px 0;
+            margin: 7px 0;
         }
 
         .decision-line span {
@@ -1594,6 +2233,62 @@ def _inject_styles() -> None:
             line-height: 1.55;
         }
 
+        .report-panel {
+            min-height: 240px;
+            padding: 18px 20px;
+            border-radius: 18px;
+            border: 1px solid rgba(190,200,212,0.38);
+            background: var(--card-strong);
+        }
+
+        .report-panel h4 {
+            margin: 0 0 12px;
+            color: var(--text);
+            font-size: 17px;
+            font-weight: 700;
+        }
+
+        .report-confidence {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(148,163,184,0.16);
+            color: var(--muted);
+            font-size: 11px;
+            line-height: 1.45;
+        }
+
+        .management-summary {
+            border-radius: 22px;
+            padding: 18px 20px;
+            margin: 0.9rem 0 1rem;
+            background: linear-gradient(135deg, #FFFFFF 0%, #F7F9FC 100%);
+            border: 1px solid rgba(190,200,212,0.34);
+        }
+
+        .management-summary span {
+            display: block;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 800;
+            margin-bottom: 8px;
+        }
+
+        .management-summary p {
+            color: var(--text);
+            font-size: 17px;
+            font-weight: 700;
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        .management-summary.warning {
+            border-left: 4px solid var(--warning);
+        }
+
+        .management-summary.ok {
+            border-left: 4px solid var(--success);
+        }
+
         .upload-status-grid {
             display: grid;
             grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1603,17 +2298,17 @@ def _inject_styles() -> None:
 
         .upload-status-card {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             gap: 10px;
-            min-height: 54px;
-            padding: 12px 14px;
+            min-height: 92px;
+            padding: 14px 14px;
             border-radius: 16px;
             background: var(--card-strong);
             border: 1px solid var(--soft-border);
             color: var(--text);
             font-size: 14px;
             font-weight: 600;
-            box-shadow: var(--soft-shadow);
+            box-shadow: 3px 3px 8px rgba(150,164,184,0.14), -3px -3px 8px rgba(255,255,255,0.7);
         }
 
         .upload-status-card.empty {
@@ -1634,6 +2329,47 @@ def _inject_styles() -> None:
             color: #15803d;
             font-size: 12px;
             font-weight: 700;
+        }
+
+        .upload-status-body {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .upload-status-title {
+            color: var(--text);
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1.35;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            flex-wrap: wrap;
+        }
+
+        .upload-status-title span {
+            color: var(--success);
+            background: rgba(82,183,136,0.12);
+            border-radius: 999px;
+            padding: 2px 7px;
+            font-size: 10px;
+            font-weight: 700;
+        }
+
+        .upload-status-file,
+        .upload-status-time {
+            color: var(--muted);
+            font-size: 11px;
+            line-height: 1.35;
+            margin-top: 5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .upload-status-card.empty .upload-status-title span {
+            color: var(--muted);
+            background: rgba(113,128,150,0.12);
         }
 
         .upload-status-card.empty .upload-status-icon {
@@ -1698,6 +2434,113 @@ def _inject_styles() -> None:
             font-size: 13px;
             line-height: 1.65;
             font-weight: 400;
+        }
+
+        .success-empty-state {
+            display: flex;
+            gap: 14px;
+            align-items: center;
+            border-radius: 20px;
+            background: #F3FBF6;
+            border: 1px solid rgba(82,183,136,0.18);
+            padding: 18px 20px;
+            margin: 1rem 0;
+        }
+
+        .success-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(82,183,136,0.14);
+            color: #2D7D55;
+            font-weight: 800;
+        }
+
+        .success-title {
+            color: var(--text);
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .success-copy {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.55;
+            margin-top: 3px;
+        }
+
+        .reason-advice-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
+            margin: 0.7rem 0 1.1rem;
+        }
+
+        .reason-advice-card {
+            border-radius: 18px;
+            background: var(--card-strong);
+            border: 1px solid rgba(190,200,212,0.36);
+            padding: 15px 16px;
+        }
+
+        .reason-advice-title {
+            color: var(--text);
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .reason-advice-copy {
+            color: var(--text);
+            font-size: 12px;
+            line-height: 1.55;
+            margin-top: 7px;
+        }
+
+        .reason-advice-copy span {
+            display: block;
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+
+        .insight-section-title {
+            color: var(--text);
+            font-size: 18px;
+            font-weight: 700;
+            margin: 1.25rem 0 0.75rem;
+        }
+
+        .insight-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
+            margin-bottom: 1.35rem;
+        }
+
+        .insight-card {
+            border-radius: var(--radius-lg);
+            background: var(--card-strong);
+            border: 1px solid rgba(190,200,212,0.32);
+            padding: 16px 17px;
+            min-height: 118px;
+        }
+
+        .insight-card span {
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 800;
+        }
+
+        .insight-card p {
+            color: var(--text);
+            font-size: 14px;
+            line-height: 1.58;
+            margin: 8px 0 0;
         }
 
         .empty-state-card,
@@ -1769,33 +2612,41 @@ def _inject_styles() -> None:
         }
 
         .soft-table-wrap {
-            width: 100%;
+            width: fit-content;
+            max-width: 100%;
             overflow-x: auto;
             border-radius: 16px;
-            border: 1px solid rgba(190, 200, 212, 0.45);
+            border: 1px solid rgba(190, 200, 212, 0.32);
             box-shadow: none;
             background: var(--table-bg);
-            margin: 0.35rem 0 1rem;
+            margin: 0.9rem 0 1.6rem;
         }
 
         table.soft-table {
-            width: auto;
+            width: max-content;
+            min-width: max-content;
             table-layout: auto;
             border-collapse: collapse;
             background: var(--table-bg);
+            border-right: 1px solid rgba(190, 200, 212, 0.38);
         }
 
         table.soft-table th,
         table.soft-table td {
             text-align: center !important;
             vertical-align: middle;
-            padding: 12px 12px;
-            border-bottom: 1px solid rgba(190, 200, 212, 0.38);
-            border-right: 0;
+            padding: 14px 14px;
+            border-bottom: 1px solid rgba(190, 200, 212, 0.30);
+            border-right: 1px solid rgba(190, 200, 212, 0.18);
             color: var(--text);
             font-size: 13px;
-            line-height: 1.35;
+            line-height: 1.45;
             white-space: nowrap;
+        }
+
+        table.soft-table th:last-child,
+        table.soft-table td:last-child {
+            border-right: 1px solid rgba(190, 200, 212, 0.42);
         }
 
         table.soft-table col.col-seq { width: 56px; }
@@ -1848,12 +2699,12 @@ def _inject_styles() -> None:
             z-index: 1;
             color: var(--muted);
             font-weight: 700;
-            background: #F8FAFC;
+            background: #FBFCFE;
             font-size: 13px;
         }
 
         table.soft-table tr:hover td {
-            background: rgba(102,126,234,0.06);
+            background: rgba(102,126,234,0.045);
         }
 
         table.soft-table tr.risk-high-row td {
@@ -1904,6 +2755,13 @@ def _inject_styles() -> None:
             .first-use-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
+            .reason-advice-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .decision-action-grid,
+            .insight-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
 
         @media (max-width: 720px) {
@@ -1916,6 +2774,19 @@ def _inject_styles() -> None:
             }
             .first-use-grid {
                 grid-template-columns: 1fr;
+            }
+            .reason-advice-grid {
+                grid-template-columns: 1fr;
+            }
+            .decision-action-grid,
+            .insight-grid {
+                grid-template-columns: 1fr;
+            }
+            .confidence-notice,
+            .next-action-card,
+            .workbench-toolbar {
+                align-items: flex-start;
+                flex-direction: column;
             }
         }
         </style>
@@ -2013,8 +2884,14 @@ def _render_risk_priority_cards(df: pd.DataFrame) -> None:
             confidence_reason = _safe_text(row.get("Diagnostic Confidence Reason")) or "证据可信度待确认。"
             operation_status = _safe_text(row.get("Operation Status")) or "待处理"
             operation_tone = _operation_status_tone(operation_status)
+            workflow_meta = _get_order_workflow_meta(order_id)
+            last_updated = workflow_meta.get("last_updated") or "尚未处理"
+            owner = workflow_meta.get("owner") or "当前运营"
+            support_confirmation = _safe_text(row.get("Amazon Support Confirmation")) or "未人工确认"
+            case_status = "已开 Case" if operation_status == "已开Case" else "未开 Case"
             priority_label = _safe_text(row.get("Operation Priority")) or "P3"
             priority_action = _safe_text(row.get("Priority Action")) or "观察即可"
+            evidence_html = _render_evidence_chips(row)
             tone = _risk_card_tone(risk_level)
             st.markdown(
                 f'<div class="risk-order-card {tone}">'
@@ -2037,10 +2914,17 @@ def _render_risk_priority_cards(df: pd.DataFrame) -> None:
                 '</div>'
                 f'<div class="risk-order-reason">{escape(risk_reason)}</div>'
                 f'<div class="risk-order-action">建议：{escape(action)}</div>'
+                f'{evidence_html}'
+                '<div class="risk-workflow-meta">'
+                f'<span>负责人：{escape(owner)}</span>'
+                f'<span>{escape(case_status)}</span>'
+                f'<span>人工确认：{escape(support_confirmation)}</span>'
+                f'<span>最后处理：{escape(last_updated)}</span>'
+                '</div>'
                 '</div>',
                 unsafe_allow_html=True,
             )
-            _render_order_action_menu(row, order_id)
+            _render_quick_order_actions(row, order_id)
 
     if st.session_state.get("operation_clipboard_text"):
         label = st.session_state.get("operation_clipboard_label", "内容")
@@ -2048,8 +2932,36 @@ def _render_risk_priority_cards(df: pd.DataFrame) -> None:
             st.code(st.session_state["operation_clipboard_text"], language="text")
 
 
+def _render_evidence_chips(row: pd.Series) -> str:
+    days = pd.to_numeric(pd.Series([row.get("Days Since Refund")]), errors="coerce").iloc[0]
+    days_text = "退款天数待确认" if pd.isna(days) else f"已退款 {int(days)} 天"
+    returns = "退货记录：已匹配" if _safe_text(row.get("Matched Returns")) == "是" else "退货记录：待确认"
+    ledger = "入仓流水：已匹配" if _safe_text(row.get("Matched Ledger")) == "是" else "入仓流水：辅助待确认"
+    reimbursement = _safe_text(row.get("Reimbursement Status")) or "赔偿记录：待确认"
+    chips = [days_text, returns, ledger, reimbursement]
+    return "<div class='evidence-chip-row'>" + "".join(
+        f"<span>{escape(_shorten_text(chip, 18))}</span>" for chip in chips
+    ) + "</div>"
+
+
+def _render_quick_order_actions(row: pd.Series, order_id: str) -> None:
+    col_copy, col_case, col_done, col_watch, col_more = st.columns([1, 1, 1, 1, 0.9])
+    if col_copy.button("复制ID", key=f"quick_copy_order_{order_id}", use_container_width=True):
+        st.session_state["operation_clipboard_text"] = order_id
+        st.session_state["operation_clipboard_label"] = "订单号"
+    if col_case.button("复制文案", key=f"quick_copy_case_{order_id}", use_container_width=True):
+        st.session_state["operation_clipboard_text"] = build_amazon_case_text(row)
+        st.session_state["operation_clipboard_label"] = "Case 文案"
+    if col_done.button("已处理", key=f"quick_done_{order_id}", use_container_width=True):
+        _set_order_operation_status(order_id, "已核查")
+    if col_watch.button("待跟进", key=f"quick_watch_{order_id}", use_container_width=True):
+        _set_order_operation_status(order_id, "待观察")
+    with col_more:
+        _render_order_action_menu(row, order_id)
+
+
 def _render_order_action_menu(row: pd.Series, order_id: str) -> None:
-    label = "处理订单 ▼"
+    label = "更多"
     if hasattr(st, "popover"):
         with st.popover(label, use_container_width=True):
             _render_order_action_buttons(row, order_id)
@@ -2059,22 +2971,6 @@ def _render_order_action_menu(row: pd.Series, order_id: str) -> None:
 
 
 def _render_order_action_buttons(row: pd.Series, order_id: str) -> None:
-    if st.button("复制订单号", key=f"copy_order_{order_id}", use_container_width=True):
-        st.session_state["operation_clipboard_text"] = order_id
-        st.session_state["operation_clipboard_label"] = "订单号"
-    if st.button("复制开 Case 文案", key=f"copy_case_{order_id}", use_container_width=True):
-        st.session_state["operation_clipboard_text"] = build_amazon_case_text(row)
-        st.session_state["operation_clipboard_label"] = "开 Case 文案"
-    case_text = build_amazon_case_text(row)
-    st.download_button(
-        "下载 Case txt",
-        data=case_text,
-        file_name=build_case_filename(row),
-        mime="text/plain",
-        key=f"download_case_{order_id}",
-        use_container_width=True,
-    )
-    st.divider()
     st.caption("运营处理状态")
     if st.button("标记已处理", key=f"handled_{order_id}", use_container_width=True):
         _set_order_operation_status(order_id, "已核查")
@@ -2113,6 +3009,13 @@ def _set_order_operation_status(order_id: str, status: str) -> None:
     statuses = dict(st.session_state.get("order_operation_statuses", {}))
     statuses[order_id] = status
     st.session_state["order_operation_statuses"] = statuses
+    meta = dict(st.session_state.get("order_operation_meta", {}))
+    meta[order_id] = {
+        **meta.get(order_id, {}),
+        "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "owner": meta.get(order_id, {}).get("owner", "当前运营"),
+    }
+    st.session_state["order_operation_meta"] = meta
     st.rerun()
 
 
@@ -2120,7 +3023,22 @@ def _set_support_confirmation(order_id: str, status: str) -> None:
     confirmations = dict(st.session_state.get("support_confirmations", {}))
     confirmations[order_id] = status
     st.session_state["support_confirmations"] = confirmations
+    meta = dict(st.session_state.get("order_operation_meta", {}))
+    meta[order_id] = {
+        **meta.get(order_id, {}),
+        "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "owner": meta.get(order_id, {}).get("owner", "当前运营"),
+    }
+    st.session_state["order_operation_meta"] = meta
     st.rerun()
+
+
+def _get_order_workflow_meta(order_id: str) -> dict[str, str]:
+    meta = st.session_state.get("order_operation_meta", {})
+    if not isinstance(meta, dict):
+        return {}
+    value = meta.get(order_id, {})
+    return value if isinstance(value, dict) else {}
 
 
 def _core_risk_reason(row: pd.Series) -> str:
@@ -2215,20 +3133,21 @@ def _render_ai_decision_center(
     top_reason = _top_reason_label(reason_summary_df)
 
     st.markdown("### 运营决策中心")
+    _render_management_one_liner(analysis_df, top_reason, top_asin, suspicious_amount)
     col_a, col_b, col_c, col_d = st.columns(4)
     col_a.markdown(_mini_card("待确认订单", f"{len(review_orders):,}", f"真正高风险 {len(true_high):,} 单", "danger"), unsafe_allow_html=True)
     col_b.markdown(_mini_card("重点 ASIN", top_asin, "按未退回和退款金额排序", "warning"), unsafe_allow_html=True)
     col_c.markdown(_mini_card("待核查退款金额", f"${suspicious_amount:,.2f}", "待确认订单对应金额", "danger"), unsafe_allow_html=True)
     col_d.markdown(_mini_card("高频退货原因", top_reason, "当前样本最高频原因", "ok"), unsafe_allow_html=True)
 
-    st.markdown("#### 第一屏：风险与关注对象")
+    st.markdown("#### 风险摘要")
     first_cols = st.columns(2)
     with first_cols[0]:
         _render_report_panel("风险总结", _find_report_section(section_map, ["整体", "风险"]))
     with first_cols[1]:
         _render_report_panel("重点 ASIN", _find_report_section(section_map, ["ASIN", "重点"]))
 
-    st.markdown("#### 第二屏：问题来源")
+    st.markdown("#### 主要问题")
     second_cols = st.columns(3)
     with second_cols[0]:
         _render_report_panel("产品问题", _find_report_section(section_map, ["产品本身", "产品问题", "质量"]))
@@ -2237,7 +3156,7 @@ def _render_ai_decision_center(
     with second_cols[2]:
         _render_report_panel("高频退货原因", _find_report_section(section_map, ["主要退货原因", "退货原因"]))
 
-    st.markdown("#### 第三屏：建议动作")
+    st.markdown("#### 建议动作")
     third_cols = st.columns(3)
     with third_cols[0]:
         _render_report_panel("建议动作", _find_report_section(section_map, ["优化建议", "建议动作"]))
@@ -2250,8 +3169,35 @@ def _render_ai_decision_center(
         st.markdown(_clean_ai_markdown(report))
 
 
+def _render_management_one_liner(
+    analysis_df: pd.DataFrame,
+    top_reason: str,
+    top_asin: str,
+    suspicious_amount: float,
+) -> None:
+    high_count = int(_series_or_default(analysis_df, "Risk Level", "").eq("High").sum())
+    if high_count > 0:
+        sentence = f"当前需重点控制 {high_count} 个真正高风险订单，待核查金额 ${suspicious_amount:,.2f}，优先从 {top_asin} 和「{top_reason}」切入。"
+        tone = "warning"
+    elif suspicious_amount > 0:
+        sentence = f"当前主要任务不是直接索赔，而是人工确认待核查金额 ${suspicious_amount:,.2f} 对应订单的证据链。"
+        tone = "neutral"
+    else:
+        sentence = f"当前没有明显高风险金额，建议把重点放在「{top_reason}」相关产品和 Listing 优化。"
+        tone = "ok"
+    st.markdown(
+        f"""
+        <div class="management-summary {tone}">
+            <span>管理层一句话总结</span>
+            <p>{escape(sentence)}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _render_report_panel(title: str, body: str) -> None:
-    display_body = _shorten_report_body(body, max_lines=5)
+    display_body = _shorten_report_body(body, max_lines=4)
     lines = [
         _strip_inline_markdown(line.lstrip("- ").strip())
         for line in display_body.splitlines()
@@ -2261,15 +3207,22 @@ def _render_report_panel(title: str, body: str) -> None:
         "问题": lines[0] if len(lines) >= 1 else "当前数据不足以形成明确判断。",
         "原因": lines[1] if len(lines) >= 2 else "需要结合退货报表、交易报表和人工核查结果继续确认。",
         "影响": lines[2] if len(lines) >= 3 else "影响范围暂不明确。",
-        "建议动作": "；".join(lines[3:5]) if len(lines) >= 4 else "先处理高金额、长周期、证据不足的订单。",
+        "建议动作": lines[3] if len(lines) >= 4 else "先处理高金额、长周期、证据不足的订单。",
     }
-    with st.container(border=True):
-        st.markdown(f"#### {title}")
-        for label, text in fields.items():
-            st.markdown(
-                f"<div class='decision-line'><span>{escape(label)}</span><p>{escape(text)}</p></div>",
-                unsafe_allow_html=True,
-            )
+    body_html = "".join(
+        f"<div class='decision-line'><span>{escape(label)}</span><p>{escape(_shorten_text(text, 120))}</p></div>"
+        for label, text in fields.items()
+    )
+    st.markdown(
+        f"""
+        <div class="report-panel">
+            <h4>{escape(title)}</h4>
+            {body_html}
+            <div class="report-confidence">结论属性：AI 辅助分析，需结合报表证据与人工核查。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _find_report_section(section_map: dict[str, str], keywords: list[str]) -> str:
@@ -2461,7 +3414,9 @@ def _strip_inline_markdown(text: str) -> str:
     clean = re.sub(r"\*\*(.*?)\*\*", r"\1", clean)
     clean = re.sub(r"__(.*?)__", r"\1", clean)
     clean = re.sub(r"`([^`]*)`", r"\1", clean)
+    clean = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", clean)
     clean = re.sub(r"(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)", r"\1", clean)
+    clean = clean.replace("**", "").replace("__", "").replace("*", "")
     clean = clean.replace("<br>", " ").replace("<br/>", " ").replace("<br />", " ")
     clean = re.sub(r"\s+", " ", clean).strip()
     return clean

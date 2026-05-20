@@ -17,12 +17,12 @@ def test_case_template_includes_order_amount_and_timing():
 
     text = build_amazon_case_text(row)
 
-    assert "Dear Amazon Seller Support" in text
+    assert "请协助核查订单" in text
     assert "701-1234567-1234567" in text
     assert "$129.99" in text
     assert "2026-03-01" in text
-    assert "67 days" in text
-    assert "Please verify" in text
+    assert "67 天" in text
+    assert "您好" in text
 
 
 def test_case_template_mentions_buyer_damaged_when_unsellable():
@@ -38,8 +38,8 @@ def test_case_template_mentions_buyer_damaged_when_unsellable():
 
     text = build_amazon_case_text(row)
 
-    assert "buyer-damaged" in text.lower()
-    assert "condition and reimbursement eligibility" in text
+    assert "买家损坏" in text
+    assert "不可售" in text
 
 
 def test_case_template_mentions_inventory_shortage_when_no_warehouse_evidence():
@@ -56,5 +56,5 @@ def test_case_template_mentions_inventory_shortage_when_no_warehouse_evidence():
 
     text = build_amazon_case_text(row)
 
-    assert "no confirmed FBA receiving or inventory movement record" in text
-    assert "inventory reconciliation" in text.lower()
+    assert "暂未匹配到明确退货入仓证据" in text
+    assert "人工确认" in text
