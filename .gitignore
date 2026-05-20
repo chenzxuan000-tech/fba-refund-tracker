@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.pycache/
+.streamlit/
+data/raw/*
+data/processed/*
+exports/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!exports/.gitkeep
+.DS_Store
