@@ -48,6 +48,18 @@ PROVIDER_CONFIGS = {
         endpoint="https://api.deepseek.com/chat/completions",
         default_model="deepseek-v4-pro",
     ),
+    "kimi": ProviderConfig(
+        name="kimi",
+        label="Kimi",
+        endpoint="https://api.moonshot.ai/v1/chat/completions",
+        default_model="kimi-k2.6",
+    ),
+    "zhipu": ProviderConfig(
+        name="zhipu",
+        label="Zhipu GLM",
+        endpoint="https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        default_model="glm-5.1",
+    ),
 }
 
 

@@ -198,7 +198,7 @@ def main() -> None:
                 _render_detected_columns(return_columns, payment_columns)
                 render_data_preview(report_frames)
     else:
-        _render_page_intro("导出报告", "生成 AI 运营决策报告，并导出当前分析表格。")
+        _render_page_intro("AI运营分析报告", "生成 AI 运营决策报告，并导出当前分析表格。")
         _render_ai_report(visible_df, summary_df, reason_analysis)
         _render_export_download(visible_df, summary_df, reason_analysis, report_frames)
 
@@ -209,7 +209,7 @@ def _render_sidebar_nav() -> str:
         "风险订单": "⚠  风险订单",
         "匹配诊断": "◎  匹配诊断",
         "退货原因": "↩  退货原因",
-        "导出报告": "✦  导出报告",
+        "AI运营分析报告": "✦  AI运营分析报告",
     }
     selected = st.radio(
         "页面导航",
@@ -661,11 +661,11 @@ def _render_metrics(df: pd.DataFrame) -> None:
     )
 
     metrics = [
-        ("退款订单数", f"{total_refunds:,}", "当前筛选范围内的退款订单", "当前样本", "neutral", "01"),
-        ("已确认退回", f"{confirmed_returned:,}", "已匹配退货或 FBA 入仓记录", "确认事实", "ok", "02"),
-        ("未确认退回", f"{unconfirmed:,}", "暂未匹配明确回仓证据", "需确认", "warning", "03"),
-        ("超60天待确认", f"{overdue_unconfirmed:,}", "不是最终判定，建议人工核查", "优先关注", "danger", "04"),
-        ("待核查退款金额", f"${suspicious_refund_amount:,.2f}", "需要人工确认订单对应退款金额", "资金影响", "danger", "05"),
+        ("退款订单数", f"{total_refunds:,}", "筛选范围退款订单", "当前样本", "neutral", "01"),
+        ("已确认退回", f"{confirmed_returned:,}", "已匹配退货/入仓", "确认事实", "ok", "02"),
+        ("未确认退回", f"{unconfirmed:,}", "缺少明确回仓证据", "需确认", "warning", "03"),
+        ("超60天待确认", f"{overdue_unconfirmed:,}", "建议人工核查", "优先关注", "danger", "04"),
+        ("待核查退款金额", f"${suspicious_refund_amount:,.2f}", "待确认订单金额", "资金影响", "danger", "05"),
     ]
     cols = st.columns(5)
     for col, (label, value, help_text, trend, tone, icon) in zip(cols, metrics):
@@ -1537,12 +1537,19 @@ def _inject_styles() -> None:
         }
 
         .metric-card {
-            min-height: 148px;
-            padding: 20px 20px 18px;
+            min-height: 150px;
+            padding: 18px 20px 17px;
             position: relative;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
             background:
                 linear-gradient(145deg, rgba(255,255,255,0.78), rgba(247,249,252,0.94));
+        }
+
+        .metric-card > * {
+            position: relative;
+            z-index: 1;
         }
 
         .metric-card::after {
@@ -1571,7 +1578,8 @@ def _inject_styles() -> None:
             display: flex;
             align-items: center;
             gap: 9px;
-            margin-bottom: 12px;
+            margin-bottom: 14px;
+            min-width: 0;
         }
 
         .metric-icon {
@@ -1596,6 +1604,13 @@ def _inject_styles() -> None:
             color: var(--muted);
             font-size: 12px;
             font-weight: 600;
+        }
+
+        .metric-label {
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .metric-value, .mini-value {
@@ -1655,7 +1670,7 @@ def _inject_styles() -> None:
         .metric-trend {
             display: inline-flex;
             width: fit-content;
-            margin-top: 8px;
+            margin-top: 9px;
             padding: 4px 9px;
             border-radius: 999px;
             background: rgba(102,126,234,0.08);
@@ -1682,7 +1697,7 @@ def _inject_styles() -> None:
         .metric-help, .mini-help {
             color: var(--muted);
             font-size: 12px;
-            margin-top: 8px;
+            margin-top: 10px;
             line-height: 1.45;
         }
 
@@ -1690,6 +1705,7 @@ def _inject_styles() -> None:
             max-width: 100%;
             white-space: nowrap;
             overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .metric-help.compact {
@@ -2211,49 +2227,107 @@ def _inject_styles() -> None:
             line-height: 1.25;
         }
 
+        .ai-section-header {
+            margin: 1.45rem 0 0.75rem;
+        }
+
+        .ai-section-header h3 {
+            margin: 0;
+            color: var(--text);
+            font-size: 22px;
+            font-weight: 700;
+            line-height: 1.25;
+        }
+
+        .ai-section-header p {
+            margin: 7px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
         .decision-line {
             display: grid;
-            grid-template-columns: 72px 1fr;
-            gap: 10px;
+            grid-template-columns: 50px 1fr;
+            gap: 9px;
             align-items: start;
-            margin: 7px 0;
+            margin: 8px 0;
         }
 
         .decision-line span {
             color: var(--accent);
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 700;
-            padding-top: 2px;
+            padding-top: 1px;
         }
 
         .decision-line p {
             margin: 0;
             color: var(--text);
-            font-size: 13px;
+            font-size: 12px;
             line-height: 1.55;
         }
 
         .report-panel {
-            min-height: 240px;
-            padding: 18px 20px;
-            border-radius: 18px;
-            border: 1px solid rgba(190,200,212,0.38);
+            min-height: 232px;
+            height: 100%;
+            padding: 18px 18px 16px;
+            border-radius: 20px;
+            border: 1px solid rgba(190,200,212,0.28);
             background: var(--card-strong);
+            box-shadow: 0 10px 28px rgba(30, 41, 59, 0.045);
+            position: relative;
+            overflow: hidden;
         }
 
+        .report-panel::before {
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 3px;
+            background: rgba(102,126,234,0.42);
+        }
+
+        .report-panel.summary::before { background: rgba(231,111,81,0.54); }
+        .report-panel.focus::before { background: rgba(244,162,97,0.58); }
+        .report-panel.action::before { background: rgba(82,183,136,0.52); }
+
         .report-panel h4 {
-            margin: 0 0 12px;
+            margin: 0 0 10px;
             color: var(--text);
-            font-size: 17px;
+            font-size: 16px;
             font-weight: 700;
         }
 
+        .report-highlight {
+            border-radius: 14px;
+            background: rgba(102,126,234,0.055);
+            color: var(--text);
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.55;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+        }
+
+        .report-panel.summary .report-highlight {
+            background: rgba(231,111,81,0.06);
+        }
+
+        .report-panel.focus .report-highlight {
+            background: rgba(244,162,97,0.08);
+        }
+
+        .report-panel.action .report-highlight {
+            background: rgba(82,183,136,0.07);
+        }
+
         .report-confidence {
-            margin-top: 12px;
-            padding-top: 10px;
+            margin-top: 11px;
+            padding-top: 9px;
             border-top: 1px solid rgba(148,163,184,0.16);
             color: var(--muted);
-            font-size: 11px;
+            font-size: 10.5px;
             line-height: 1.45;
         }
 
@@ -3140,30 +3214,30 @@ def _render_ai_decision_center(
     col_c.markdown(_mini_card("待核查退款金额", f"${suspicious_amount:,.2f}", "待确认订单对应金额", "danger"), unsafe_allow_html=True)
     col_d.markdown(_mini_card("高频退货原因", top_reason, "当前样本最高频原因", "ok"), unsafe_allow_html=True)
 
-    st.markdown("#### 风险摘要")
-    first_cols = st.columns(2)
+    _render_ai_section_header("风险摘要", "先判断当前风险是否需要立即处理，以及重点从哪个 ASIN 切入。")
+    first_cols = st.columns([1.08, 0.92], gap="large")
     with first_cols[0]:
-        _render_report_panel("风险总结", _find_report_section(section_map, ["整体", "风险"]))
+        _render_report_panel("风险总结", _find_report_section(section_map, ["整体", "风险"]), "summary")
     with first_cols[1]:
-        _render_report_panel("重点 ASIN", _find_report_section(section_map, ["ASIN", "重点"]))
+        _render_report_panel("重点 ASIN", _find_report_section(section_map, ["ASIN", "重点"]), "focus")
 
-    st.markdown("#### 主要问题")
-    second_cols = st.columns(3)
+    _render_ai_section_header("主要问题", "把退货风险拆成产品、Listing 和退货原因三条线，便于分工处理。")
+    second_cols = st.columns(3, gap="large")
     with second_cols[0]:
-        _render_report_panel("产品问题", _find_report_section(section_map, ["产品本身", "产品问题", "质量"]))
+        _render_report_panel("产品问题", _find_report_section(section_map, ["产品本身", "产品问题", "质量"]), "issue")
     with second_cols[1]:
-        _render_report_panel("Listing 问题", _find_report_section(section_map, ["Listing", "图片", "标题", "五点", "A+"]))
+        _render_report_panel("Listing 问题", _find_report_section(section_map, ["Listing", "图片", "标题", "五点", "A+"]), "issue")
     with second_cols[2]:
-        _render_report_panel("高频退货原因", _find_report_section(section_map, ["主要退货原因", "退货原因"]))
+        _render_report_panel("高频退货原因", _find_report_section(section_map, ["主要退货原因", "退货原因"]), "issue")
 
-    st.markdown("#### 建议动作")
-    third_cols = st.columns(3)
+    _render_ai_section_header("建议动作", "只保留可以直接执行的下一步，避免报告变成泛泛建议。")
+    third_cols = st.columns(3, gap="large")
     with third_cols[0]:
-        _render_report_panel("建议动作", _find_report_section(section_map, ["优化建议", "建议动作"]))
+        _render_report_panel("建议动作", _find_report_section(section_map, ["优化建议", "建议动作"]), "action")
     with third_cols[1]:
-        _render_report_panel("开 Case 建议", _find_report_section(section_map, ["开 Case", "核查"]))
+        _render_report_panel("开 Case 建议", _find_report_section(section_map, ["开 Case", "核查"]), "action")
     with third_cols[2]:
-        _render_report_panel("索赔建议", _find_report_section(section_map, ["赔偿", "索赔", "客服", "售后"]))
+        _render_report_panel("索赔建议", _find_report_section(section_map, ["赔偿", "索赔", "客服", "售后"]), "action")
 
     with st.expander("查看完整 AI 报告原文", expanded=False):
         st.markdown(_clean_ai_markdown(report))
@@ -3196,33 +3270,50 @@ def _render_management_one_liner(
     )
 
 
-def _render_report_panel(title: str, body: str) -> None:
-    display_body = _shorten_report_body(body, max_lines=4)
-    lines = [
-        _strip_inline_markdown(line.lstrip("- ").strip())
-        for line in display_body.splitlines()
-        if line.strip()
-    ]
-    fields = {
-        "问题": lines[0] if len(lines) >= 1 else "当前数据不足以形成明确判断。",
-        "原因": lines[1] if len(lines) >= 2 else "需要结合退货报表、交易报表和人工核查结果继续确认。",
-        "影响": lines[2] if len(lines) >= 3 else "影响范围暂不明确。",
-        "建议动作": lines[3] if len(lines) >= 4 else "先处理高金额、长周期、证据不足的订单。",
-    }
-    body_html = "".join(
-        f"<div class='decision-line'><span>{escape(label)}</span><p>{escape(_shorten_text(text, 120))}</p></div>"
-        for label, text in fields.items()
-    )
+def _render_ai_section_header(title: str, subtitle: str) -> None:
     st.markdown(
         f"""
-        <div class="report-panel">
-            <h4>{escape(title)}</h4>
-            {body_html}
-            <div class="report-confidence">结论属性：AI 辅助分析，需结合报表证据与人工核查。</div>
+        <div class="ai-section-header">
+            <h3>{escape(title)}</h3>
+            <p>{escape(subtitle)}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def _render_report_panel(title: str, body: str, variant: str = "issue") -> None:
+    display_body = _shorten_report_body(body, max_lines=5)
+    lines = [
+        _strip_report_label(_strip_inline_markdown(line.lstrip("- ").strip()))
+        for line in display_body.splitlines()
+        if line.strip()
+    ]
+    headline = lines[0] if len(lines) >= 1 else "当前数据不足以形成明确判断。"
+    fields = [
+        ("依据", lines[1] if len(lines) >= 2 else "需要结合退货报表、交易报表和人工核查结果继续确认。"),
+        ("影响", lines[2] if len(lines) >= 3 else "影响范围暂不明确。"),
+        ("下一步", lines[3] if len(lines) >= 4 else "先处理高金额、长周期、证据不足的订单。"),
+    ]
+    body_html = "".join(
+        f"<div class='decision-line'><span>{escape(label)}</span><p title='{escape(text)}'>{escape(_shorten_text(text, 88))}</p></div>"
+        for label, text in fields
+    )
+    st.markdown(
+        f"""
+        <div class="report-panel {escape(variant)}">
+            <h4>{escape(title)}</h4>
+            <div class="report-highlight" title="{escape(headline)}">{escape(_shorten_text(headline, 112))}</div>
+            {body_html}
+            <div class="report-confidence">AI 辅助结论，需结合报表证据与人工核查。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _strip_report_label(text: str) -> str:
+    return re.sub(r"^(问题|原因|影响|建议动作|行动|结论|判断|数据摘要|分析|建议)[:：]\s*", "", text).strip()
 
 
 def _find_report_section(section_map: dict[str, str], keywords: list[str]) -> str:

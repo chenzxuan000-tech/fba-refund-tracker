@@ -126,6 +126,18 @@ def test_deepseek_default_model_uses_v4_pro():
     assert "lite" not in config.default_model.lower()
 
 
+def test_additional_ai_providers_are_available():
+    kimi = get_provider_config("kimi")
+    zhipu = get_provider_config("zhipu")
+
+    assert kimi.label == "Kimi"
+    assert kimi.endpoint == "https://api.moonshot.ai/v1/chat/completions"
+    assert kimi.default_model == "kimi-k2.6"
+    assert zhipu.label == "Zhipu GLM"
+    assert zhipu.endpoint == "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    assert zhipu.default_model == "glm-5.1"
+
+
 def test_excel_export_can_include_ai_report_sheet():
     content = build_excel_export(
         pd.DataFrame([{"Order ID": "111-1"}]),
