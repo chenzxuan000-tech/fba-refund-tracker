@@ -39,9 +39,9 @@ def render_data_preview(report_frames: dict[str, pd.DataFrame]) -> None:
                 st.success("必要字段已识别。")
 
             st.markdown("**字段匹配结果**")
-            st.dataframe(matching, hide_index=True, use_container_width=True)
+            st.dataframe(matching, hide_index=True, width="stretch")
             with st.expander("展开查看原始数据", expanded=False):
-                st.dataframe(frame.head(50), hide_index=True, use_container_width=True)
+                st.dataframe(frame.head(50), hide_index=True, width="stretch")
 
 
 def render_match_diagnostics(analysis_df: pd.DataFrame) -> None:
@@ -51,7 +51,7 @@ def render_match_diagnostics(analysis_df: pd.DataFrame) -> None:
 
     with st.expander("查看匹配汇总", expanded=False):
         diagnostics = build_match_diagnostics(analysis_df)
-        st.dataframe(diagnostics, hide_index=True, use_container_width=True)
+        st.dataframe(diagnostics, hide_index=True, width="stretch")
 
     st.markdown("**订单匹配结果（前 10 条）**")
     risk_orders = analysis_df[analysis_df["Risk Level"].isin(["High", "Needs Review", "Data Incomplete"])].copy()
@@ -74,7 +74,7 @@ def render_match_diagnostics(analysis_df: pd.DataFrame) -> None:
     st.dataframe(
         compact_visible.head(10),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "退款金额": st.column_config.NumberColumn("退款金额", format="$%.2f"),
         },
@@ -84,7 +84,7 @@ def render_match_diagnostics(analysis_df: pd.DataFrame) -> None:
             st.dataframe(
                 compact_visible,
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 column_config={
                     "退款金额": st.column_config.NumberColumn("退款金额", format="$%.2f"),
                 },
@@ -114,7 +114,7 @@ def render_order_audit_table(analysis_df: pd.DataFrame) -> None:
     st.dataframe(
         audit,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "退款金额": st.column_config.NumberColumn("退款金额", format="$%.2f"),
             "距离退款天数": st.column_config.NumberColumn("距离退款天数", format="%d"),
@@ -211,7 +211,7 @@ def _render_fact_list(items: dict[str, object]) -> None:
         {"项目": key, "结果": _clean_visible_value(_operational_text(value))}
         for key, value in items.items()
     ]
-    st.dataframe(pd.DataFrame(clean_items), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(clean_items), hide_index=True, width="stretch")
 
 
 def render_top_risk_orders_dashboard(analysis_df: pd.DataFrame) -> None:
@@ -242,7 +242,7 @@ def render_top_risk_orders_dashboard(analysis_df: pd.DataFrame) -> None:
     st.dataframe(
         display_top_orders,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "退款金额": st.column_config.NumberColumn("退款金额", format="$%.2f"),
             "风险分数": st.column_config.NumberColumn("风险分数", format="%d"),
@@ -270,7 +270,7 @@ def render_top_risk_orders_dashboard(analysis_df: pd.DataFrame) -> None:
         st.dataframe(
             display_buyer_summary,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "累计退款金额": st.column_config.NumberColumn(
                     "累计退款金额", format="$%.2f"
@@ -331,7 +331,7 @@ def _localized_match_table(df: pd.DataFrame) -> pd.DataFrame:
     for column in ["风险原因", "建议动作"]:
         if column in visible.columns:
             visible[column] = visible[column].apply(_operational_text)
-    return visible.applymap(_clean_visible_value)
+    return visible.map(_clean_visible_value)
 
 
 def _localize_order_columns(df: pd.DataFrame) -> pd.DataFrame:

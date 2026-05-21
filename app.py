@@ -235,10 +235,10 @@ def _render_sidebar_filters() -> dict[str, object]:
             help="常用运营场景可以直接套用，也可以保存当前筛选。",
         )
         col_apply, col_reset = st.columns(2)
-        if col_apply.button("套用方案", use_container_width=True):
+        if col_apply.button("套用方案", width="stretch"):
             _apply_filter_preset(selected_preset)
             st.rerun()
-        if col_reset.button("重置筛选", use_container_width=True):
+        if col_reset.button("重置筛选", width="stretch"):
             _reset_filters()
             st.rerun()
 
@@ -263,7 +263,7 @@ def _render_sidebar_filters() -> dict[str, object]:
         )
 
         preset_name = st.text_input("保存筛选方案", placeholder="例如：加拿大站高金额退款", key="filter_preset_name")
-        if st.button("保存当前筛选", use_container_width=True):
+        if st.button("保存当前筛选", width="stretch"):
             _save_current_filter_preset(preset_name)
             st.rerun()
     return {
@@ -395,7 +395,7 @@ def _render_export_download(
         data=export_bytes,
         file_name=f"fba_return_refund_analysis_{date.today().isoformat()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -536,7 +536,7 @@ def _render_empty_state() -> None:
     )
     col_sample, col_hint = st.columns([1, 2])
     with col_sample:
-        if st.button("使用示例数据快速体验", type="primary", use_container_width=True):
+        if st.button("使用示例数据快速体验", type="primary", width="stretch"):
             st.session_state["use_sample_data"] = True
             st.rerun()
     with col_hint:
@@ -555,7 +555,7 @@ def _render_sample_data_banner() -> None:
         """,
         unsafe_allow_html=True,
     )
-    if st.button("退出示例数据，上传真实报表", use_container_width=False):
+    if st.button("退出示例数据，上传真实报表", width="content"):
         st.session_state["use_sample_data"] = False
         st.rerun()
 
@@ -893,8 +893,6 @@ def _render_orders_table(df: pd.DataFrame) -> None:
     _render_risk_priority_cards(df)
     with st.expander("查看全部风险订单", expanded=False):
         _render_soft_table(_display_orders(df, compact=False), currency_columns={"退款金额"})
-    with st.expander("查看详情字段", expanded=False):
-        _render_soft_table(_display_orders(df, compact=False, include_details=True), currency_columns={"退款金额"})
 
 def _render_ai_report(
     analysis_df: pd.DataFrame,
@@ -935,7 +933,7 @@ def _render_ai_report(
             help="默认使用兼容 Chat Completions 的接口。如使用代理或自建网关，可在这里替换。",
         )
 
-    if st.button("生成 AI 分析报告", type="primary", use_container_width=True):
+    if st.button("生成 AI 分析报告", type="primary", width="stretch"):
         if not api_key.strip():
             st.warning("请先输入 API Key。")
             return
@@ -962,7 +960,7 @@ def _render_ai_report(
             data=report.encode("utf-8"),
             file_name=f"fba_ai_operations_report_{date.today().isoformat()}.md",
             mime="text/markdown",
-            use_container_width=True,
+            width="stretch",
         )
     else:
         st.info("点击上方按钮后，会生成包含风险总结、重点 ASIN、疑似未退货订单、Listing 和售后建议的中文报告。")
@@ -977,7 +975,7 @@ def _render_asin_summary(df: pd.DataFrame) -> None:
     st.dataframe(
         df,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "总退款金额": st.column_config.NumberColumn("总退款金额", format="$%.2f"),
         },
@@ -1153,7 +1151,7 @@ def _render_recommendations(df: pd.DataFrame) -> None:
     st.dataframe(
         df,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "总退款金额": st.column_config.NumberColumn("总退款金额", format="$%.2f"),
         },
@@ -1207,16 +1205,56 @@ def _inject_styles() -> None:
         [data-testid="stHeader"] {
             background: rgba(233, 238, 245, 0.82);
             backdrop-filter: blur(12px);
+            z-index: 9998;
         }
 
-        [data-testid="stToolbar"],
         [data-testid="stDecoration"],
         [data-testid="stStatusWidget"],
-        [data-testid="stBaseButton-header"],
         [data-testid="stDeployButton"],
+        [data-testid="stAppDeployButton"],
         #MainMenu {
             display: none !important;
             visibility: hidden !important;
+        }
+
+        [data-testid="stToolbar"] {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+        }
+
+        [data-testid="collapsedControl"],
+        [data-testid="stSidebarCollapsedControl"],
+        [data-testid="stExpandSidebarButton"],
+        [data-testid="stSidebarCollapseButton"] {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            z-index: 9999 !important;
+        }
+
+        [data-testid="stExpandSidebarButton"],
+        [data-testid="collapsedControl"] {
+            position: fixed !important;
+            top: 14px !important;
+            left: 14px !important;
+            width: 42px !important;
+            height: 42px !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border-radius: 14px !important;
+            background: rgba(255,255,255,0.84) !important;
+            border: 1px solid rgba(190,200,212,0.52) !important;
+            box-shadow: 4px 4px 12px rgba(150,164,184,0.22) !important;
+        }
+
+        [data-testid="stExpandSidebarButton"] svg,
+        [data-testid="stExpandSidebarButton"] button,
+        [data-testid="collapsedControl"] button {
+            display: inline-flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            color: var(--text) !important;
         }
 
         .main .block-container {
@@ -2280,10 +2318,10 @@ def _inject_styles() -> None:
 
         .decision-line {
             display: grid;
-            grid-template-columns: 50px 1fr;
+            grid-template-columns: 44px 1fr;
             gap: 9px;
             align-items: start;
-            margin: 8px 0;
+            margin: 7px 0;
         }
 
         .decision-line span {
@@ -2297,7 +2335,7 @@ def _inject_styles() -> None:
             margin: 0;
             color: var(--text);
             font-size: 12px;
-            line-height: 1.55;
+            line-height: 1.5;
         }
 
         .report-panel {
@@ -2337,8 +2375,8 @@ def _inject_styles() -> None:
             color: var(--text);
             font-size: 13px;
             font-weight: 600;
-            line-height: 1.55;
-            padding: 10px 12px;
+            line-height: 1.5;
+            padding: 9px 11px;
             margin-bottom: 12px;
         }
 
@@ -3052,15 +3090,15 @@ def _render_evidence_chips(row: pd.Series) -> str:
 
 def _render_quick_order_actions(row: pd.Series, order_id: str) -> None:
     col_copy, col_case, col_done, col_watch, col_more = st.columns([1, 1, 1, 1, 0.9])
-    if col_copy.button("复制ID", key=f"quick_copy_order_{order_id}", use_container_width=True):
+    if col_copy.button("复制ID", key=f"quick_copy_order_{order_id}", width="stretch"):
         st.session_state["operation_clipboard_text"] = order_id
         st.session_state["operation_clipboard_label"] = "订单号"
-    if col_case.button("复制文案", key=f"quick_copy_case_{order_id}", use_container_width=True):
+    if col_case.button("复制文案", key=f"quick_copy_case_{order_id}", width="stretch"):
         st.session_state["operation_clipboard_text"] = build_amazon_case_text(row)
         st.session_state["operation_clipboard_label"] = "Case 文案"
-    if col_done.button("已处理", key=f"quick_done_{order_id}", use_container_width=True):
+    if col_done.button("已处理", key=f"quick_done_{order_id}", width="stretch"):
         _set_order_operation_status(order_id, "已核查")
-    if col_watch.button("待跟进", key=f"quick_watch_{order_id}", use_container_width=True):
+    if col_watch.button("待跟进", key=f"quick_watch_{order_id}", width="stretch"):
         _set_order_operation_status(order_id, "待观察")
     with col_more:
         _render_order_action_menu(row, order_id)
@@ -3069,7 +3107,7 @@ def _render_quick_order_actions(row: pd.Series, order_id: str) -> None:
 def _render_order_action_menu(row: pd.Series, order_id: str) -> None:
     label = "更多"
     if hasattr(st, "popover"):
-        with st.popover(label, use_container_width=True):
+        with st.popover(label, width="stretch"):
             _render_order_action_buttons(row, order_id)
     else:
         with st.expander(label, expanded=False):
@@ -3078,33 +3116,33 @@ def _render_order_action_menu(row: pd.Series, order_id: str) -> None:
 
 def _render_order_action_buttons(row: pd.Series, order_id: str) -> None:
     st.caption("运营处理状态")
-    if st.button("标记已处理", key=f"handled_{order_id}", use_container_width=True):
+    if st.button("标记已处理", key=f"handled_{order_id}", width="stretch"):
         _set_order_operation_status(order_id, "已核查")
-    if st.button("忽略", key=f"ignore_{order_id}", use_container_width=True):
+    if st.button("忽略", key=f"ignore_{order_id}", width="stretch"):
         _set_order_operation_status(order_id, "已忽略")
-    if st.button("加入人工复核", key=f"review_{order_id}", use_container_width=True):
+    if st.button("加入人工复核", key=f"review_{order_id}", width="stretch"):
         _set_order_operation_status(order_id, "人工复核")
-    if st.button("待观察", key=f"watch_{order_id}", use_container_width=True):
+    if st.button("待观察", key=f"watch_{order_id}", width="stretch"):
         _set_order_operation_status(order_id, "待观察")
-    if st.button("已开Case", key=f"case_opened_{order_id}", use_container_width=True):
+    if st.button("已开Case", key=f"case_opened_{order_id}", width="stretch"):
         _set_order_operation_status(order_id, "已开Case")
-    if st.button("已确认正常", key=f"normal_{order_id}", use_container_width=True):
+    if st.button("已确认正常", key=f"normal_{order_id}", width="stretch"):
         _set_order_operation_status(order_id, "已确认正常")
-    if st.button("恢复待处理", key=f"pending_{order_id}", use_container_width=True):
+    if st.button("恢复待处理", key=f"pending_{order_id}", width="stretch"):
         _set_order_operation_status(order_id, "待处理")
     st.divider()
     st.caption("Amazon Support 核查结果")
-    if st.button("Amazon已确认退回", key=f"support_returned_{order_id}", use_container_width=True):
+    if st.button("Amazon已确认退回", key=f"support_returned_{order_id}", width="stretch"):
         _set_support_confirmation(order_id, "Amazon已确认退回")
-    if st.button("Amazon确认可售", key=f"support_sellable_{order_id}", use_container_width=True):
+    if st.button("Amazon确认可售", key=f"support_sellable_{order_id}", width="stretch"):
         _set_support_confirmation(order_id, "Amazon确认可售")
-    if st.button("Amazon确认不可售", key=f"support_unsellable_{order_id}", use_container_width=True):
+    if st.button("Amazon确认不可售", key=f"support_unsellable_{order_id}", width="stretch"):
         _set_support_confirmation(order_id, "Amazon确认不可售")
-    if st.button("Amazon确认未退回", key=f"support_not_returned_{order_id}", use_container_width=True):
+    if st.button("Amazon确认未退回", key=f"support_not_returned_{order_id}", width="stretch"):
         _set_support_confirmation(order_id, "Amazon确认未退回")
-    if st.button("Amazon拒绝赔偿", key=f"support_rejected_{order_id}", use_container_width=True):
+    if st.button("Amazon拒绝赔偿", key=f"support_rejected_{order_id}", width="stretch"):
         _set_support_confirmation(order_id, "Amazon拒绝赔偿")
-    if st.button("清除人工确认", key=f"support_clear_{order_id}", use_container_width=True):
+    if st.button("清除人工确认", key=f"support_clear_{order_id}", width="stretch"):
         confirmations = dict(st.session_state.get("support_confirmations", {}))
         confirmations.pop(order_id, None)
         st.session_state["support_confirmations"] = confirmations
@@ -3315,12 +3353,7 @@ def _render_ai_section_header(title: str, subtitle: str) -> None:
 
 
 def _render_report_panel(title: str, body: str, variant: str = "issue") -> None:
-    display_body = _shorten_report_body(body, max_lines=5)
-    lines = [
-        _strip_report_label(_strip_inline_markdown(line.lstrip("- ").strip()))
-        for line in display_body.splitlines()
-        if line.strip()
-    ]
+    lines = _extract_report_points(body, max_lines=5)
     headline = lines[0] if len(lines) >= 1 else "当前数据不足以形成明确判断。"
     fields = [
         ("依据", lines[1] if len(lines) >= 2 else "需要结合退货报表、交易报表和人工核查结果继续确认。"),
@@ -3328,14 +3361,14 @@ def _render_report_panel(title: str, body: str, variant: str = "issue") -> None:
         ("下一步", lines[3] if len(lines) >= 4 else "先处理高金额、长周期、证据不足的订单。"),
     ]
     body_html = "".join(
-        f"<div class='decision-line'><span>{escape(label)}</span><p title='{escape(text)}'>{escape(_shorten_text(text, 88))}</p></div>"
+        f"<div class='decision-line'><span>{escape(label)}</span><p>{escape(_concise_complete_text(text, 72))}</p></div>"
         for label, text in fields
     )
     st.markdown(
         f"""
         <div class="report-panel {escape(variant)}">
             <h4>{escape(title)}</h4>
-            <div class="report-highlight" title="{escape(headline)}">{escape(_shorten_text(headline, 112))}</div>
+            <div class="report-highlight">{escape(_concise_complete_text(headline, 82))}</div>
             {body_html}
             <div class="report-confidence">AI 辅助结论，需结合报表证据与人工核查。</div>
         </div>
@@ -3360,18 +3393,64 @@ def _find_report_section(section_map: dict[str, str], keywords: list[str]) -> st
     return ""
 
 
-def _shorten_report_body(body: str, max_lines: int = 6) -> str:
+def _extract_report_points(body: str, max_lines: int = 6) -> list[str]:
     lines = [line.strip() for line in _clean_ai_markdown(body).splitlines() if line.strip()]
     if not lines:
-        return ""
-    simplified = []
+        return []
+    simplified: list[str] = []
     for line in lines:
         if line.startswith("#"):
             continue
-        simplified.append(_strip_inline_markdown(line))
+        clean = _strip_report_label(_strip_inline_markdown(line.lstrip("- ").strip()))
+        clean = _concise_complete_text(clean, 88)
+        if clean and clean not in simplified:
+            simplified.append(clean)
         if len(simplified) >= max_lines:
             break
-    return "\n".join(simplified)
+    return simplified
+
+
+def _concise_complete_text(text: str, max_length: int = 80) -> str:
+    clean = _strip_inline_markdown(text)
+    clean = re.sub(r"^\s*[•\-]\s*", "", clean)
+    clean = re.sub(r"\s+", " ", clean).strip(" ：:;；，,。")
+    if not clean:
+        return ""
+    if len(clean) <= max_length:
+        return _ensure_sentence_end(clean)
+
+    sentences = re.split(r"(?<=[。！？!?])\s*", clean)
+    for sentence in sentences:
+        sentence = sentence.strip(" ：:;；，,")
+        if sentence and len(sentence) <= max_length:
+            return _ensure_sentence_end(sentence)
+
+    clauses = re.split(r"[；;。！？!?]", clean)
+    for clause in clauses:
+        clause = clause.strip(" ：:，,")
+        if 8 <= len(clause) <= max_length:
+            return _ensure_sentence_end(clause)
+
+    parts = [part.strip() for part in re.split(r"[，,、]", clean) if part.strip()]
+    selected: list[str] = []
+    for part in parts:
+        candidate = "，".join(selected + [part])
+        if len(candidate) > max_length:
+            break
+        selected.append(part)
+    if selected:
+        return _ensure_sentence_end("，".join(selected))
+
+    return _ensure_sentence_end(clean[:max_length].rstrip(" ：:，,；;"))
+
+
+def _ensure_sentence_end(text: str) -> str:
+    clean = text.strip()
+    if not clean:
+        return ""
+    if clean.endswith(("。", "！", "？", ".", "!", "?")):
+        return clean
+    return f"{clean}。"
 
 
 def _top_asin_label(df: pd.DataFrame) -> str:
