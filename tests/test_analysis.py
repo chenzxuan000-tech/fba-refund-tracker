@@ -272,10 +272,36 @@ def test_return_reason_analysis_labels_unidentified_asin_sku_instead_of_blank_ce
     result = build_return_reason_analysis(analysis)
     distribution = result["asin_reason_distribution"].sort_values("Refund Amount").reset_index(drop=True)
 
-    assert distribution.loc[0, "ASIN"] == "未识别 ASIN"
-    assert distribution.loc[0, "SKU"] == "未识别 SKU"
-    assert distribution.loc[1, "ASIN"] == "未识别 ASIN"
+    assert distribution.loc[0, "ASIN"] == ""
+    assert distribution.loc[0, "SKU"] == ""
+    assert distribution.loc[1, "ASIN"] == ""
     assert distribution.loc[1, "SKU"] == "LEDGER-SKU-1"
+
+
+def test_build_return_reason_analysis_handles_empty_filtered_results():
+    analysis = pd.DataFrame(
+        columns=[
+            "Order ID",
+            "ASIN",
+            "SKU",
+            "Product Name",
+            "Refund Date",
+            "Return Date",
+            "Days Since Refund",
+            "Return Reason",
+            "Status",
+            "Risk Level",
+            "Refund Amount",
+        ]
+    )
+
+    result = build_return_reason_analysis(analysis)
+
+    assert result["order_analysis"].empty
+    assert result["asin_summary"].empty
+    assert result["reason_category_summary"].empty
+    assert result["asin_reason_distribution"].empty
+    assert result["asin_recommendations"].empty
 
 
 def test_summarize_return_reasons_groups_by_asin_sku_and_reason():

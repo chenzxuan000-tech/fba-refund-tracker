@@ -667,25 +667,31 @@ def _render_metrics(df: pd.DataFrame) -> None:
         ("超60天待确认", f"{overdue_unconfirmed:,}", "建议人工核查", "优先关注", "danger", "04"),
         ("待核查退款金额", f"${suspicious_refund_amount:,.2f}", "待确认订单金额", "资金影响", "danger", "05"),
     ]
-    cols = st.columns(5)
-    for col, (label, value, help_text, trend, tone, icon) in zip(cols, metrics):
+    cards = []
+    for label, value, help_text, trend, tone, icon in metrics:
         value_class = _metric_value_class(value)
         help_class = _metric_help_class(help_text)
-        with col:
-            st.markdown(
-                f"""
-                <div class="metric-card {tone}">
-                    <div class="metric-top">
-                        <span class="metric-icon">{icon}</span>
-                        <span class="metric-label">{label}</span>
-                    </div>
-                    <div class="{value_class}" title="{escape(value)}">{escape(value)}</div>
-                    <div class="metric-trend">{trend}</div>
-                    <div class="{help_class}" title="{escape(help_text)}">{escape(help_text)}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+        cards.append(
+            "<div class='metric-card {tone}'>"
+            "<div class='metric-top'>"
+            "<span class='metric-icon'>{icon}</span>"
+            "<span class='metric-label'>{label}</span>"
+            "</div>"
+            "<div class='{value_class}' title='{value}'>{value}</div>"
+            "<div class='metric-trend'>{trend}</div>"
+            "<div class='{help_class}' title='{help_text}'>{help_text}</div>"
+            "</div>".format(
+                tone=escape(tone),
+                icon=escape(icon),
+                label=escape(label),
+                value_class=escape(value_class),
+                value=escape(value),
+                trend=escape(trend),
+                help_class=escape(help_class),
+                help_text=escape(help_text),
             )
+        )
+    st.markdown(f"<div class='metric-grid'>{''.join(cards)}</div>", unsafe_allow_html=True)
 
 
 def _render_dashboard(
@@ -1510,6 +1516,14 @@ def _inject_styles() -> None:
             color: #ffffff !important;
         }
 
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 22px;
+            align-items: stretch;
+            margin: 1.05rem 0 1.65rem;
+        }
+
         .metric-card {
             background: var(--card);
             border: 1px solid var(--soft-border);
@@ -1714,6 +1728,24 @@ def _inject_styles() -> None:
 
         .metric-help.tight {
             font-size: 10px;
+        }
+
+        @media (max-width: 1320px) {
+            .metric-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 860px) {
+            .metric-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 560px) {
+            .metric-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         .dashboard-section-heading {
@@ -3349,8 +3381,13 @@ def _top_asin_label(df: pd.DataFrame) -> str:
     sort_columns = [column for column in ["未退回订单数", "总退款金额", "退款订单数"] if column in sorted_df.columns]
     if sort_columns:
         sorted_df = sorted_df.sort_values(sort_columns, ascending=[False] * len(sort_columns))
-    value = _safe_text(sorted_df.iloc[0].get("ASIN"))
-    return value or "暂无"
+    asin_values = sorted_df["ASIN"].fillna("").astype(str).str.strip()
+    asin_values = asin_values[
+        ~(asin_values.eq("") | asin_values.str.lower().isin({"nan", "none", "null", "-", "--", "<na>"}))
+    ]
+    if asin_values.empty:
+        return "暂无明确 ASIN"
+    return asin_values.iloc[0]
 
 
 def _top_reason_label(df: pd.DataFrame) -> str:

@@ -361,8 +361,8 @@ def build_return_reason_analysis(analysis_df: pd.DataFrame) -> dict[str, pd.Data
     enriched["Return Reason Category"] = enriched["Return Reason"].apply(categorize_return_reason)
     if "Ledger SKU" in enriched.columns:
         enriched["SKU"] = _fill_blank_from(enriched["SKU"], enriched["Ledger SKU"])
-    enriched["ASIN"] = _label_blank_identifier(enriched["ASIN"], "未识别 ASIN")
-    enriched["SKU"] = _label_blank_identifier(enriched["SKU"], "未识别 SKU")
+    enriched["ASIN"] = _blank_identifier(enriched["ASIN"])
+    enriched["SKU"] = _blank_identifier(enriched["SKU"])
     amazon_received = enriched.get(
         "Amazon Warehouse Received",
         pd.Series(["未知"] * len(enriched), index=enriched.index),
@@ -551,7 +551,11 @@ def _build_asin_recommendations(
         (recommendations["不可售退货数"] > 0)
         | recommendations["Categories"].apply(lambda categories: bool(categories & {"产品质量问题", "产品故障", "缺件问题"}))
     ).map(_yes_no)
-    recommendations["建议重点"] = recommendations.apply(_recommendation_focus, axis=1)
+    recommendations["建议重点"] = (
+        recommendations.apply(_recommendation_focus, axis=1)
+        if not recommendations.empty
+        else pd.Series(dtype="object")
+    )
 
     columns = [
         "ASIN",
@@ -799,10 +803,10 @@ def _first_nonblank(series: pd.Series):
     return text.iloc[0]
 
 
-def _label_blank_identifier(series: pd.Series, label: str) -> pd.Series:
+def _blank_identifier(series: pd.Series) -> pd.Series:
     text = series.fillna("").astype(str).str.strip()
     missing = text.eq("") | text.str.lower().isin({"nan", "none", "null", "-", "--", "<na>"})
-    return text.where(~missing, label)
+    return text.where(~missing, "")
 
 
 def _optional_text(df: pd.DataFrame, column: Optional[str]) -> pd.Series:
